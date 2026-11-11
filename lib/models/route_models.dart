@@ -15,6 +15,8 @@ class PassengerStop {
   final String comment;
   final String office;
   final String resort;
+  final String? hotelTime; // Sobota: godz. odbioru z hotelu w PL; Niedziela: godz. dojazdu do hotelu w PL
+  final String? homeTime;  // Sobota: godz. dojazdu do domu w DE; Niedziela: godz. odbioru z domu w DE
   final String? driveTime;
   final String? distance;
   PickupStatus status;
@@ -31,6 +33,8 @@ class PassengerStop {
     this.comment = '',
     this.office = '',
     this.resort = '',
+    this.hotelTime,
+    this.homeTime,
     this.driveTime,
     this.distance,
     this.status = PickupStatus.pending,

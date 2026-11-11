@@ -17,9 +17,17 @@ void main() {
     // Verify vehicle information in title
     expect(find.textContaining('BB.01'), findsWidgets);
     expect(find.textContaining('Ford Custom'), findsWidgets);
-    expect(find.text('Grzesiek Korowajczyk'), findsOneWidget);
 
-    // Scroll to find passenger
+    // Switch to Tab 1: Pojazd & Paliwo to verify driver details
+    await tester.tap(find.text('Pojazd & Paliwo'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Grzesiek Korowajczyk'), findsWidgets);
+
+    // Switch back to Tab 0: Trasa
+    await tester.tap(find.text('Trasa'));
+    await tester.pumpAndSettle();
+
+    // Scroll to find passenger (Angelika Borchert is in the current target hero card)
     await tester.scrollUntilVisible(
       find.text('Angelika Borchert'),
       200.0,
@@ -33,25 +41,26 @@ void main() {
     await tester.pumpWidget(const BalticBusApp());
     await tester.pumpAndSettle();
 
-    // Verify initial state: Pauza button is visible
-    expect(find.text('Pauza'), findsOneWidget);
-    expect(find.text('☕ TRWA PRZERWA KIEROWCY'), findsNothing);
-
-    // 1. Click "Pauza" to start break
-    await tester.tap(find.text('Pauza'));
+    // Switch to Tab 2: Raporty & Czas
+    await tester.tap(find.text('Raporty & Czas'));
     await tester.pumpAndSettle();
 
-    // Verify break is active: banner is shown, button says "Koniec pauzy"
-    expect(find.text('☕ TRWA PRZERWA KIEROWCY'), findsOneWidget);
-    expect(find.text('Koniec pauzy'), findsAtLeastNWidgets(1));
+    // Verify initial state: Rozpocznij pauzę button is visible
+    expect(find.text('Rozpocznij pauzę'), findsOneWidget);
 
-    // 2. Click "Koniec pauzy" in the bottom bar to finish break
-    await tester.tap(find.text('Koniec pauzy').last);
+    // 1. Click "Rozpocznij pauzę" to start break
+    await tester.tap(find.text('Rozpocznij pauzę'));
     await tester.pumpAndSettle();
 
-    // Verify break is ended: banner is gone, button shows "Pauza (1)"
-    expect(find.text('☕ TRWA PRZERWA KIEROWCY'), findsNothing);
-    expect(find.text('Pauza (1)'), findsOneWidget);
+    // Verify break is active: button says "Koniec pauzy"
+    expect(find.text('Koniec pauzy'), findsOneWidget);
+
+    // 2. Click "Koniec pauzy" to finish break
+    await tester.tap(find.text('Koniec pauzy'));
+    await tester.pumpAndSettle();
+
+    // Verify break is ended: button shows "Rozpocznij pauzę" again
+    expect(find.text('Rozpocznij pauzę'), findsOneWidget);
   });
 
   testWidgets('Plan Jazdy full weekend summary dialog test', (WidgetTester tester) async {
@@ -59,15 +68,19 @@ void main() {
     await tester.pumpWidget(const BalticBusApp());
     await tester.pumpAndSettle();
 
-    // Verify "Plan Jazdy" button exists and click it
-    expect(find.text('Plan Jazdy'), findsOneWidget);
-    await tester.tap(find.text('Plan Jazdy'));
+    // Switch to Tab 2: Raporty & Czas
+    await tester.tap(find.text('Raporty & Czas'));
+    await tester.pumpAndSettle();
+
+    // Verify "Otwórz pełny Plan Jazdy" action exists and click it
+    expect(find.text('Otwórz pełny Plan Jazdy'), findsOneWidget);
+    await tester.tap(find.text('Otwórz pełny Plan Jazdy'));
     await tester.pumpAndSettle();
 
     // Verify dialog title and elements matching physical card
     expect(find.textContaining('PLAN JAZDY • BB.01'), findsOneWidget);
     expect(find.text('STAN LICZNIKA'), findsOneWidget);
-    expect(find.text('ZALICZKA:'), findsOneWidget);
+    expect(find.text('ZALICZKA:'), findsWidgets);
     expect(find.text('WYDATKI EURO:'), findsOneWidget);
     expect(find.text('WYDATKI ZŁ:'), findsOneWidget);
     expect(find.text('ODEBRANE OD GOŚCI:'), findsOneWidget);
@@ -119,17 +132,20 @@ void main() {
     await tester.pumpWidget(const BalticBusApp());
     await tester.pumpAndSettle();
 
-    // 1. Open Plan Jazdy dialog
-    expect(find.text('Plan Jazdy'), findsOneWidget);
-    await tester.tap(find.text('Plan Jazdy'));
+    // Switch to Tab 2: Raporty & Czas
+    await tester.tap(find.text('Raporty & Czas'));
     await tester.pumpAndSettle();
 
-    // 2. Click "Zakończ kurs"
-    expect(find.text('Zakończ kurs'), findsOneWidget);
-    await tester.tap(find.text('Zakończ kurs'));
+    // Scroll to find "Zakończ kurs i wyczyść dane" button and ensure fully visible
+    await tester.ensureVisible(find.text('Zakończ kurs i wyczyść dane'));
     await tester.pumpAndSettle();
 
-    // 3. Confirm dialog
+    // 1. Click "Zakończ kurs i wyczyść dane"
+    expect(find.text('Zakończ kurs i wyczyść dane'), findsOneWidget);
+    await tester.tap(find.text('Zakończ kurs i wyczyść dane'));
+    await tester.pumpAndSettle();
+
+    // 2. Confirm dialog
     expect(find.text('Zakończyć kurs?'), findsOneWidget);
     expect(find.text('Wyczyść i zakończ kurs'), findsOneWidget);
     await tester.tap(find.text('Wyczyść i zakończ kurs'));
@@ -139,18 +155,41 @@ void main() {
     await tester.pump(const Duration(seconds: 4));
     await tester.pumpAndSettle();
 
-    // 4. Verify no active trip screen is displayed (production card is visible, test card hidden)
+    // 3. Verify no active trip screen is displayed (production button is visible)
     expect(find.text('Brak aktywnego kursu'), findsOneWidget);
-    expect(find.text('Wczytaj plik Excel (.xlsx)'), findsOneWidget);
-    expect(find.text('Wczytaj z bazy (Assets)'), findsNothing);
+    expect(find.text('Rozpocznij przejazd'), findsOneWidget);
 
-    // 5. Tap BalticBus logo 5 times to reveal hidden dev/test option
-    final logoFinder = find.byKey(const ValueKey('balticbus_logo_detector'));
-    for (int i = 0; i < 5; i++) {
-      await tester.tap(logoFinder);
-      await tester.pump(const Duration(milliseconds: 100));
-    }
+    // 4. Tap "Rozpocznij przejazd" button to open the import sheet and verify its actions
+    await tester.tap(find.text('Rozpocznij przejazd'));
     await tester.pumpAndSettle();
-    expect(find.text('Wczytaj z bazy (Assets)'), findsOneWidget);
+    expect(find.text('Import rozkładu jazdy (Excel)'), findsOneWidget);
+    expect(find.text('Wybierz plik Excel z urządzenia'), findsOneWidget);
+  });
+
+  testWidgets('Bottom navigation tabs switch between Route, Vehicle & Fuel, and Reports & Time',
+      (WidgetTester tester) async {
+    SharedPreferences.setMockInitialValues({});
+    await tester.pumpWidget(const BalticBusApp());
+    await tester.pumpAndSettle();
+
+    // Tab 0: Trasa & Pasażerowie
+    expect(find.text('Trasa'), findsOneWidget);
+    expect(find.text('Pojazd & Paliwo'), findsOneWidget);
+    expect(find.text('Raporty & Czas'), findsOneWidget);
+    expect(find.text('Angelika Borchert'), findsOneWidget);
+
+    // Switch to Tab 1: Pojazd & Paliwo
+    await tester.tap(find.text('Pojazd & Paliwo'));
+    await tester.pumpAndSettle();
+    expect(find.text('Paliwo i Tankowania'), findsOneWidget);
+    expect(find.text('START'), findsOneWidget);
+    expect(find.text('KONIEC'), findsOneWidget);
+
+    // Switch to Tab 2: Raporty & Czas
+    await tester.tap(find.text('Raporty & Czas'));
+    await tester.pumpAndSettle();
+    expect(find.text('Czas Pracy & Pauzy'), findsOneWidget);
+    expect(find.text('Zaliczka i Finanse'), findsOneWidget);
+    expect(find.text('Centrum Raportowania'), findsOneWidget);
   });
 }

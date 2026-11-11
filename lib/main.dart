@@ -235,6 +235,8 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
   String _selectedBusCode = 'BB.01';
   String _selectedDate = '2026-08-01'; // Sobota wywóz lub Niedziela przywóz
   bool _isLoading = false;
+  int _currentTabIndex = 0;
+  bool _showCompletedPassengers = false;
   double _advanceEur = 0.0;
   double _advancePln = 0.0;
   double _cashCollectedPln = 0.0;
@@ -273,14 +275,22 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
           _allRoutes = [];
         });
       }
-    } else if (_allRoutes.isEmpty) {
-      if (mounted) {
-        setState(() {
-          _allRoutes = sampleBusRoutes;
-        });
-      }
-      await _restoreStateForRoute(_currentRoute);
     } else {
+      // Automatycznie wczytujemy kompletny rozkład z pliku Excel (assets)
+      try {
+        final parsed = await ExcelParserService.loadFromAssets();
+        if (parsed.isNotEmpty && mounted) {
+          setState(() {
+            _allRoutes = parsed;
+          });
+        }
+      } catch (_) {
+        if (_allRoutes.isEmpty && mounted) {
+          setState(() {
+            _allRoutes = sampleBusRoutes;
+          });
+        }
+      }
       await _restoreStateForRoute(_currentRoute);
     }
   }
@@ -301,9 +311,6 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
     }
     return _allRoutes.first;
   }
-
-  List<String> get _availableBusCodes =>
-      _allRoutes.map((r) => r.code).toSet().toList();
 
   List<String> get _availableDates =>
       _allRoutes.map((r) => r.date).toSet().toList()..sort();
@@ -371,19 +378,35 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
       final routes = await ExcelParserService.loadFromAssets();
       if (routes.isNotEmpty) {
         await StorageService.setHasActiveTrip(true);
+        final busCodes = routes.map((r) => r.code).toSet().toList();
+        final dates = routes.map((r) => r.date).toSet().toList()..sort();
+
+        String defaultBus = _selectedBusCode;
+        if (!busCodes.contains(defaultBus)) {
+          defaultBus = busCodes.first;
+        }
+
         setState(() {
           _allRoutes = routes;
-          if (!_availableBusCodes.contains(_selectedBusCode)) {
-            _selectedBusCode = _availableBusCodes.first;
+          _selectedBusCode = defaultBus;
+          if (!dates.contains(_selectedDate) && dates.isNotEmpty) {
+            _selectedDate = dates.first;
           }
+          _isLoading = false;
         });
-        await _restoreStateForRoute(_currentRoute);
+
         if (mounted) {
-          final totalPassengers = routes.fold(0, (s, r) => s + r.stops.length);
-          _showNotice(
-            'Wczytano ${routes.length} tras (${_availableBusCodes.length} busów, $totalPassengers pasażerów) z pliku WEEK_01-02.08.2026.xlsx!',
-            Icons.check_circle,
-          );
+          if (busCodes.length > 1) {
+            await _showBusSelectionDialog(busCodes, routes, 'WEEK_01-02.08.2026.xlsx');
+          } else {
+            await _restoreStateForRoute(_currentRoute);
+            if (mounted) {
+              _showNotice(
+                'Wczytano ${routes.length} tras (${routes.first.driverName})!',
+                Icons.check_circle,
+              );
+            }
+          }
         }
       }
     } catch (e) {
@@ -391,7 +414,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
         _showNotice('Błąd wczytywania: $e', Icons.error);
       }
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted && _isLoading) setState(() => _isLoading = false);
     }
   }
 
@@ -413,23 +436,45 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
           final routes = ExcelParserService.parseExcelBytes(bytes);
           if (routes.isNotEmpty) {
             await StorageService.setHasActiveTrip(true);
+
+            // Wylicz dostępne busy
+            final busCodes = routes.map((r) => r.code).toSet().toList();
+            final dates = routes.map((r) => r.date).toSet().toList()..sort();
+
+            String defaultBus = _selectedBusCode;
+            if (!busCodes.contains(defaultBus)) {
+              defaultBus = busCodes.first;
+            }
+
             setState(() {
               _allRoutes = routes;
-              if (!_availableBusCodes.contains(_selectedBusCode)) {
-                _selectedBusCode = _availableBusCodes.first;
+              _selectedBusCode = defaultBus;
+              if (!dates.contains(_selectedDate) && dates.isNotEmpty) {
+                _selectedDate = dates.first;
               }
+              _isLoading = false;
             });
-            await _restoreStateForRoute(_currentRoute);
+
+            // Jeśli jest więcej niż 1 bus, pokaż okno wyboru busa i kierowcy
             if (mounted) {
-              final totalPassengers = routes.fold(0, (s, r) => s + r.stops.length);
-              _showNotice(
-                'Wczytano ${file.name}: ${routes.length} tras (${_availableBusCodes.length} busów, $totalPassengers pasażerów)!',
-                Icons.check_circle,
-              );
+              if (busCodes.length > 1) {
+                await _showBusSelectionDialog(busCodes, routes, file.name);
+              } else {
+                await _restoreStateForRoute(_currentRoute);
+                if (mounted) {
+                  _showNotice(
+                    'Wczytano ${file.name}: ${routes.length} tras (${routes.first.driverName})!',
+                    Icons.check_circle,
+                  );
+                }
+              }
             }
           } else if (mounted) {
+            setState(() => _isLoading = false);
             _showNotice('Nie znaleziono pasujących tras w pliku.', Icons.warning);
           }
+        } else {
+          setState(() => _isLoading = false);
         }
       }
     } catch (e) {
@@ -437,8 +482,205 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
         _showNotice('Błąd importu pliku: $e', Icons.error);
       }
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted && _isLoading) setState(() => _isLoading = false);
     }
+  }
+
+  Future<void> _showBusSelectionDialog(List<String> busCodes, List<BusRoute> routes, String fileName) async {
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogCtx) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return Dialog(
+            backgroundColor: const Color(0xFF1B2321),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+              side: BorderSide(
+                color: AppColors.brandingOrange.withValues(alpha: 0.5),
+                width: 1.4,
+              ),
+            ),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420, maxHeight: 560),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(18, 18, 18, 14),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: AppColors.brandingOrange.withValues(alpha: 0.18),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Icon(Icons.directions_bus_filled, color: AppColors.brandingOrange, size: 24),
+                        ),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'WYBIERZ SWÓJ POJAZD',
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white,
+                                  letterSpacing: 0.4,
+                                ),
+                              ),
+                              SizedBox(height: 2),
+                              Text(
+                                'Wybierz busa i kierowcę, aby załadować trasę:',
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  color: Colors.white70,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    const Divider(height: 1, color: Colors.white12),
+                    const SizedBox(height: 10),
+                    Flexible(
+                      child: ListView.separated(
+                        shrinkWrap: true,
+                        itemCount: busCodes.length,
+                        separatorBuilder: (ctx, idx) => const SizedBox(height: 8),
+                        itemBuilder: (context, index) {
+                          final code = busCodes[index];
+                          final busRoute = routes.firstWhere((r) => r.code == code);
+                          final isSelected = _selectedBusCode == code;
+                          final driver = busRoute.driverName.isNotEmpty ? busRoute.driverName : 'Brak danych';
+                          final vehicle = '${busRoute.vehicleModel} ${busRoute.registrationNumber}'.trim();
+                          final stopsCount = routes.where((r) => r.code == code).fold(0, (s, r) => s + r.stops.length);
+
+                          return InkWell(
+                            borderRadius: BorderRadius.circular(12),
+                            onTap: () {
+                              setDialogState(() {
+                                _selectedBusCode = code;
+                              });
+                              setState(() {
+                                _selectedBusCode = code;
+                              });
+                            },
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 180),
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                              decoration: BoxDecoration(
+                                color: isSelected
+                                    ? AppColors.brandingOrange.withValues(alpha: 0.22)
+                                    : Colors.white.withValues(alpha: 0.05),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: isSelected ? AppColors.brandingOrange : Colors.white12,
+                                  width: isSelected ? 1.8 : 1.0,
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: isSelected ? AppColors.brandingOrange : Colors.black45,
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Text(
+                                      code,
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.bold,
+                                        color: isSelected ? Colors.white : Colors.amber,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          driver,
+                                          style: const TextStyle(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 1),
+                                        Text(
+                                          vehicle.isNotEmpty ? vehicle : 'Pasażerów: $stopsCount',
+                                          style: TextStyle(
+                                            fontSize: 11.5,
+                                            color: isSelected ? Colors.white70 : Colors.white54,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  if (isSelected)
+                                    const Icon(Icons.check_circle, color: AppColors.brandingOrange, size: 22)
+                                  else
+                                    Text(
+                                      '$stopsCount os.',
+                                      style: const TextStyle(fontSize: 11.5, color: Colors.white38),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppColors.brandingOrange,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 13),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        onPressed: () async {
+                          Navigator.pop(dialogCtx);
+                          await _restoreStateForRoute(_currentRoute);
+                          if (mounted) {
+                            final busRoute = routes.firstWhere((r) => r.code == _selectedBusCode);
+                            _showNotice(
+                              'Załadowano trasę dla $_selectedBusCode (${busRoute.driverName})!',
+                              Icons.check_circle,
+                            );
+                          }
+                        },
+                        child: Text(
+                          'Załaduj trasę ($_selectedBusCode)',
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 0.3,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
   }
 
   void _showImportOptions() {
@@ -577,6 +819,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
     await StorageService.clearAllTripData();
     setState(() {
       _allRoutes = [];
+      _currentTabIndex = 0;
       _advanceEur = 0.0;
       _advancePln = 0.0;
       _cashCollectedPln = 0.0;
@@ -722,28 +965,28 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                           ),
                         ],
                       ),
-                      // Dolna sekcja: Przezroczyste boksy akcji umieszczone na dole ekranu
+                      // Dolna sekcja: Pastylka "Rozpocznij przejazd" prowadząca do arkusza importu/zarządzania rozkładem
                       Padding(
-                        padding: const EdgeInsets.only(top: 28, bottom: 12),
-                        child: Column(
-                          children: [
-                            _buildOutlinedActionCard(
-                              icon: Icons.file_upload,
-                              accentColor: const Color(0xFFCBD5E1),
-                              title: 'Wczytaj plik Excel (.xlsx)',
-                              onTap: _pickExcelFile,
+                        padding: const EdgeInsets.only(top: 28, bottom: 20),
+                        child: FilledButton(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: AppColors.brandingOrange,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(30),
                             ),
-                            if (_showDevOptions) ...[
-                              const SizedBox(height: 14),
-                              _buildOutlinedActionCard(
-                                icon: Icons.bug_report_outlined,
-                                accentColor: const Color(0xFF94A3B8),
-                                title: 'Wczytaj z bazy (Assets)',
-                                trailingBadge: _buildBrandBadge('DEV / TEST', const Color(0xFF94A3B8)),
-                                onTap: _importFromAssets,
-                              ),
-                            ],
-                          ],
+                            elevation: 4,
+                          ),
+                          onPressed: _showImportOptions,
+                          child: const Text(
+                            'Rozpocznij przejazd',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
                         ),
                       ),
                     ],
@@ -754,108 +997,6 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
           ),
         ),
       ],
-    );
-  }
-
-  Widget _buildOutlinedActionCard({
-    required IconData icon,
-    required Color accentColor,
-    required String title,
-    String subtitle = '',
-    required VoidCallback onTap,
-    Widget? trailingBadge,
-    bool showBorder = false,
-  }) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(12),
-        border: showBorder
-            ? Border.all(
-                color: accentColor,
-                width: 1.3,
-              )
-            : null,
-      ),
-      child: Material(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(12),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: onTap,
-          splashColor: accentColor.withValues(alpha: 0.25),
-          highlightColor: accentColor.withValues(alpha: 0.12),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-            child: Row(
-              children: [
-                Icon(icon, color: accentColor, size: 22),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Row(
-                        children: [
-                          Flexible(
-                            child: Text(
-                              title,
-                              style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white,
-                                letterSpacing: 0.2,
-                                shadows: [
-                                  Shadow(
-                                    color: Colors.black87,
-                                    blurRadius: 6,
-                                    offset: Offset(0, 1),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                          if (trailingBadge != null) ...[
-                            const SizedBox(width: 6),
-                            trailingBadge,
-                          ],
-                        ],
-                      ),
-                      if (subtitle.isNotEmpty) ...[
-                        const SizedBox(height: 2),
-                        Text(
-                          subtitle,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: Colors.white.withValues(alpha: 0.85),
-                            height: 1.2,
-                            shadows: const [
-                              Shadow(
-                                color: Colors.black87,
-                                blurRadius: 4,
-                                offset: Offset(0, 1),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 6),
-                const Icon(
-                  Icons.arrow_forward_ios,
-                  size: 13,
-                  color: Colors.white70,
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
     );
   }
 
@@ -1006,185 +1147,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
     );
   }
 
-  void _showRefuelingsSheet() {
-    final route = _currentRoute;
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: _cardBg,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheetState) => Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(ctx).viewInsets.bottom,
-            top: 16,
-            left: 16,
-            right: 16,
-          ),
-          child: SafeArea(
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Row(
-                        children: [
-                          const Icon(Icons.local_gas_station, color: AppColors.brandingOrange),
-                          const SizedBox(width: 8),
-                          Text(
-                            'Tankowania na trasie',
-                            style: TextStyle(
-                              fontSize: 17,
-                              fontWeight: FontWeight.bold,
-                              color: _textPrimary,
-                            ),
-                          ),
-                        ],
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.close),
-                        onPressed: () => Navigator.pop(ctx),
-                      ),
-                    ],
-                  ),
-                  if (route.refuelings.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: _subtleBg,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: _borderColor),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceAround,
-                        children: [
-                          Column(
-                            children: [
-                              const Text('Diesel (ON)', style: TextStyle(fontSize: 11, color: AppColors.gray)),
-                              Text(
-                                '${route.totalDieselLiters.toStringAsFixed(1)} L',
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppColors.brandingOrange),
-                              ),
-                            ],
-                          ),
-                          if (route.totalAdBlueLiters > 0)
-                            Column(
-                              children: [
-                                const Text('AdBlue', style: TextStyle(fontSize: 11, color: AppColors.gray)),
-                                Text(
-                                  '${route.totalAdBlueLiters.toStringAsFixed(1)} L',
-                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.blueAccent),
-                                ),
-                              ],
-                            ),
-                          if (route.averageConsumptionLPer100Km != null)
-                            Column(
-                              children: [
-                                const Text('Śr. spalanie ON', style: TextStyle(fontSize: 11, color: AppColors.gray)),
-                                Text(
-                                  '${route.averageConsumptionLPer100Km!.toStringAsFixed(2)} l/100km',
-                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.white),
-                                ),
-                              ],
-                            ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    ...route.refuelings.map((ref) {
-                      final isAdBlue = ref.fuelType == 'AdBlue';
-                      return Card(
-                        elevation: 0,
-                        margin: const EdgeInsets.symmetric(vertical: 4),
-                        color: _cardBg,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          side: BorderSide(color: _borderColor),
-                        ),
-                        child: ListTile(
-                          dense: true,
-                          leading: CircleAvatar(
-                            radius: 14,
-                            backgroundColor: isAdBlue ? Colors.blue.shade100 : (_isDark ? AppColors.darkCard : AppColors.primary),
-                            child: Icon(
-                              isAdBlue ? Icons.water_drop : Icons.ev_station,
-                              color: isAdBlue ? Colors.blue.shade800 : Colors.white,
-                              size: 14,
-                            ),
-                          ),
-                          title: Row(
-                            children: [
-                              Text(
-                                '${ref.liters.toStringAsFixed(1)} L • ${ref.amount.toStringAsFixed(2)} ${ref.currency}',
-                                style: TextStyle(fontWeight: FontWeight.bold, color: _textPrimary),
-                              ),
-                              const SizedBox(width: 8),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                                decoration: BoxDecoration(
-                                  color: isAdBlue ? Colors.blue.shade50 : AppColors.brandingOrange.withValues(alpha: 0.1),
-                                  borderRadius: BorderRadius.circular(4),
-                                  border: Border.all(
-                                    color: isAdBlue ? Colors.blue.shade200 : AppColors.brandingOrange.withValues(alpha: 0.3),
-                                  ),
-                                ),
-                                child: Text(
-                                  ref.fuelType,
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w600,
-                                    color: isAdBlue ? Colors.blue.shade900 : AppColors.brandingOrange,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                          subtitle: Text(
-                            '${ref.stationName} (${ref.paymentMethod}) @ ${ref.odometerKm} km',
-                            style: TextStyle(color: _textSecondary),
-                          ),
-                          trailing: IconButton(
-                            icon: const Icon(Icons.delete_outline, size: 18, color: Colors.red),
-                            onPressed: () {
-                              setSheetState(() {
-                                route.refuelings.removeWhere((r) => r.id == ref.id);
-                              });
-                              setState(() {});
-                              StorageService.saveRefuelings(route.id, route.refuelings);
-                            },
-                          ),
-                        ),
-                      );
-                    }),
-                    const Divider(height: 20),
-                  ],
-                  FilledButton.icon(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: AppColors.brandingOrange,
-                      minimumSize: const Size.fromHeight(45),
-                    ),
-                    icon: const Icon(Icons.add),
-                    label: const Text('Dodaj nowe tankowanie'),
-                    onPressed: () {
-                      Navigator.pop(ctx);
-                      _showAddRefuelingDialog();
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+
 
   void _showAddRefuelingDialog() {
     final route = _currentRoute;
@@ -1467,27 +1430,48 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
           ),
           child: Scaffold(
         backgroundColor: Colors.transparent,
-        extendBody: true,
         appBar: AppBar(
           backgroundColor: Colors.transparent,
           elevation: 0,
           scrolledUnderElevation: 0,
-          title: Text(
-            '${route.code} • ${route.vehicleModel} (${route.registrationNumber})',
-            style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 0.3,
-              color: Colors.white,
-              shadows: [
-                Shadow(color: Colors.black45, blurRadius: 4, offset: Offset(0, 1)),
-              ],
-            ),
-            overflow: TextOverflow.ellipsis,
+          centerTitle: false,
+          titleSpacing: 16,
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '${route.code} • ${route.vehicleModel}',
+                style: const TextStyle(
+                  fontSize: 16.5,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.3,
+                  color: Colors.white,
+                  shadows: [
+                    Shadow(color: Colors.black45, blurRadius: 4, offset: Offset(0, 1)),
+                  ],
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 1),
+              Text(
+                '${route.driverName}${route.registrationNumber.isNotEmpty ? ' • ${route.registrationNumber}' : ''}',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: Colors.white.withValues(alpha: 0.85),
+                  letterSpacing: 0.2,
+                  shadows: const [
+                    Shadow(color: Colors.black45, blurRadius: 3, offset: Offset(0, 1)),
+                  ],
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
           ),
           actions: [
             Container(
-              margin: const EdgeInsets.only(right: 4),
+              margin: const EdgeInsets.only(right: 8),
               decoration: BoxDecoration(
                 color: Colors.black.withValues(alpha: 0.22),
                 shape: BoxShape.circle,
@@ -1496,43 +1480,6 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                 icon: const Icon(Icons.palette_outlined, color: Colors.white, size: 20),
                 tooltip: 'Zmień motyw (Emerald / Walnut)',
                 onPressed: _showThemeSelectorSheet,
-              ),
-            ),
-            Container(
-              margin: const EdgeInsets.only(right: 4),
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.22),
-                shape: BoxShape.circle,
-              ),
-              child: IconButton(
-                icon: const Icon(Icons.file_open_outlined, color: Colors.white, size: 20),
-                tooltip: 'Wczytaj rozkład z pliku Excel',
-                onPressed: _showImportOptions,
-              ),
-            ),
-            Container(
-              margin: const EdgeInsets.only(right: 8),
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.22),
-                shape: BoxShape.circle,
-              ),
-              child: PopupMenuButton<String>(
-                icon: const Icon(Icons.directions_bus, color: Colors.white, size: 20),
-                tooltip: 'Wybierz pojazd (${_availableBusCodes.length} dostępnych)',
-                initialValue: _selectedBusCode,
-                onSelected: (code) {
-                  setState(() {
-                    _selectedBusCode = code;
-                  });
-                  _restoreStateForRoute(_currentRoute);
-                },
-                itemBuilder: (context) => _availableBusCodes.map((code) {
-                  final bus = _allRoutes.firstWhere((r) => r.code == code);
-                  return PopupMenuItem<String>(
-                    value: code,
-                    child: Text('$code – ${bus.vehicleModel} (${bus.driverName})'),
-                  );
-                }).toList(),
               ),
             ),
           ],
@@ -1551,91 +1498,1290 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                   ],
                 ),
               )
-            : ListView(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
+            : IndexedStack(
+                index: _currentTabIndex,
                 children: [
-                  // Szybkie akcje kierowcy (Pauza, Paliwo, Plan Jazdy) - pastylki bez boxa
-                  _buildQuickActionsBar(route),
-                  const SizedBox(height: 12),
+                  _buildRouteTab(route, isPLtoDE),
+                  _buildVehicleAndFuelTab(route, isPLtoDE),
+                  _buildReportsAndWorkTimeTab(route, isPLtoDE),
+                ],
+              ),
+        bottomNavigationBar: _buildBottomNavigationBar(route),
+      ),
+    );
+  },
+);
+}
 
-                  // Przełącznik Dnia / Kierunku (Sobota Wywóz vs Niedziela Przywóz) - pastylki bez boxa
-                  _buildDaySelector(),
-                  const SizedBox(height: 12),
+  Widget _buildBottomNavigationBar(BusRoute route) {
+    final isDark = _isDark;
 
-                  // Karta pojazdu, kierowcy i kierunku trasy
-                  _buildVehicleCard(route, isPLtoDE),
-                  const SizedBox(height: 12),
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF0C1014).withValues(alpha: 0.96) : Colors.white.withValues(alpha: 0.96),
+        border: Border(
+          top: BorderSide(
+            color: AppColors.activeTheme.border.withValues(alpha: 0.40),
+            width: 1.2,
+          ),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.50),
+            blurRadius: 16,
+            offset: const Offset(0, -4),
+          ),
+        ],
+      ),
+      child: SafeArea(
+        top: false,
+        child: BottomNavigationBar(
+          currentIndex: _currentTabIndex,
+          onTap: (index) => setState(() => _currentTabIndex = index),
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          selectedItemColor: AppColors.brandingOrange,
+          unselectedItemColor: Colors.white60,
+          selectedFontSize: 12,
+          unselectedFontSize: 11,
+          type: BottomNavigationBarType.fixed,
+          items: [
+            const BottomNavigationBarItem(
+              icon: Icon(Icons.alt_route_outlined),
+              activeIcon: Icon(Icons.alt_route),
+              label: 'Trasa',
+            ),
+            const BottomNavigationBarItem(
+              icon: Icon(Icons.directions_bus_outlined),
+              activeIcon: Icon(Icons.directions_bus),
+              label: 'Pojazd & Paliwo',
+            ),
+            BottomNavigationBarItem(
+              icon: Badge(
+                isLabelVisible: route.activeBreak != null,
+                backgroundColor: const Color(0xFFC84031),
+                label: const Text('PAUZA', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold)),
+                child: const Icon(Icons.assignment_outlined),
+              ),
+              activeIcon: Badge(
+                isLabelVisible: route.activeBreak != null,
+                backgroundColor: const Color(0xFFC84031),
+                label: const Text('PAUZA', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold)),
+                child: const Icon(Icons.assignment),
+              ),
+              label: 'Raporty & Czas',
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
-                  // Liczniki kilometrów (START / STOP)
-                  _buildOdometerCard(route),
-                  const SizedBox(height: 12),
+  // TAB 0: TRASA & PASAŻEROWIE
+  Widget _buildRouteTab(BusRoute route, bool isPLtoDE) {
+    // Bieżący cel podróży (pasażer wieziony jako pierwszy)
+    PassengerStop? currentTarget;
+    try {
+      if (isPLtoDE) {
+        // Sobota: cel to dowóz pierwszego pasażera do domu w Niemczech
+        currentTarget = route.stops.firstWhere(
+          (s) =>
+              s.status != PickupStatus.delivered &&
+              s.status != PickupStatus.cancelled &&
+              s.status != PickupStatus.noShow,
+        );
+      } else {
+        // Niedziela: najpierw zbiórka z domów w DE (pending), a po zbiórce dowóz do hotelu w PL
+        final pending = route.stops.where((s) => s.status == PickupStatus.pending).toList();
+        if (pending.isNotEmpty) {
+          currentTarget = pending.first;
+        } else {
+          currentTarget = route.stops.firstWhere(
+            (s) =>
+                s.status != PickupStatus.delivered &&
+                s.status != PickupStatus.cancelled &&
+                s.status != PickupStatus.noShow,
+          );
+        }
+      }
+    } catch (_) {
+      currentTarget = null;
+    }
 
-                  // Aktywna przerwa kierowcy (jeśli trwa)
-                  if (route.activeBreak != null) ...[
-                    _buildActiveBreakBanner(route.activeBreak!),
-                    const SizedBox(height: 12),
-                  ],
+    // Pozostali oczekujący pasażerowie (bez tego, który jest na karcie głównego celu)
+    final otherPendingStops = route.stops.where((s) {
+      if (s == currentTarget) return false;
+      return s.status != PickupStatus.delivered &&
+          s.status != PickupStatus.cancelled &&
+          s.status != PickupStatus.noShow;
+    }).toList();
 
-                  // Specjalne uwagi logistyczne
-                  if (route.specialNotes.isNotEmpty) ...[
-                    _buildSpecialNotesCard(route.specialNotes),
-                    const SizedBox(height: 12),
-                  ],
+    // Pasażerowie już obsłużeni
+    final completedStops = route.stops.where((s) {
+      if (s == currentTarget) return false;
+      return s.status == PickupStatus.delivered ||
+          s.status == PickupStatus.cancelled ||
+          s.status == PickupStatus.noShow;
+    }).toList();
 
-                  // Punkty przesiadkowe
-                  if (route.transferPoints.isNotEmpty) ...[
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 4),
-                      child: Text(
-                        '🔄 Punkty przesiadkowe i zbiórki',
-                        style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                          shadows: [
-                            Shadow(color: Colors.black54, blurRadius: 4, offset: Offset(0, 1)),
-                          ],
-                        ),
-                      ),
-                    ),
-                    ...route.transferPoints.map(_buildTransferPointCard),
-                    const SizedBox(height: 12),
-                  ],
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 36),
+      children: [
+        // Przełącznik Dnia (Sobota / Niedziela) + Pastylka Pauzy Kierowcy
+        _buildDaySelector(route),
+        const SizedBox(height: 12),
 
-                  // Lista pasażerów
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          isPLtoDE
-                              ? '👥 Wywóz: Pasażerowie do Niemiec'
-                              : '👥 Przywóz: Pasażerowie do Polski',
-                          style: const TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                            shadows: [
-                              Shadow(color: Colors.black54, blurRadius: 4, offset: Offset(0, 1)),
-                            ],
-                          ),
-                        ),
-                        Text(
-                          '${route.stops.length} adresów',
-                          style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w600),
-                        ),
-                      ],
-                    ),
-                  ),
-                  ...route.stops.map((stop) => _buildPassengerCard(stop, isPLtoDE)),
-                  const SizedBox(height: 24),
+        // Aktywna przerwa kierowcy (wyświetlana nad ważnymi poleceniami logistycznymi)
+        if (route.activeBreak != null) ...[
+          _buildActiveBreakBanner(route.activeBreak!),
+          const SizedBox(height: 12),
+        ],
+
+        // Specjalne uwagi i polecenia logistyczne
+        if (route.specialNotes.isNotEmpty) ...[
+          _buildSpecialNotesCard(route.specialNotes),
+          const SizedBox(height: 12),
+        ],
+
+        // Punkty przesiadkowe (pod poleceniami logistycznymi)
+        if (route.transferPoints.isNotEmpty) ...[
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 4),
+            child: Text(
+              '🔄 Punkty przesiadkowe i zbiórki',
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+                shadows: [
+                  Shadow(color: Colors.black54, blurRadius: 4, offset: Offset(0, 1)),
                 ],
               ),
             ),
-          );
-        },
+          ),
+          ...route.transferPoints.map(_buildTransferPointCard),
+          const SizedBox(height: 12),
+        ],
+
+        // Wyróżniona karta Bieżącego Celu Podróży (Kto pierwszy do domu / hotelu)
+        _buildNextStopHeroCard(route, isPLtoDE, currentTarget),
+        const SizedBox(height: 14),
+
+        // Pozostali pasażerowie do obsłużenia
+        if (otherPendingStops.isNotEmpty) ...[
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  isPLtoDE
+                      ? '👥 Pozostali do dowiezienia (${otherPendingStops.length})'
+                      : '👥 Pozostali do obsłużenia (${otherPendingStops.length})',
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                    shadows: [
+                      Shadow(color: Colors.black54, blurRadius: 4, offset: Offset(0, 1)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 6),
+          ...otherPendingStops.map((stop) => _buildPassengerCard(stop, isPLtoDE)),
+          const SizedBox(height: 14),
+        ],
+
+        // Sekcja obsłużonych pasażerów (zwijana, aby nie robić bałaganu na ekranie)
+        if (completedStops.isNotEmpty) ...[
+          InkWell(
+            onTap: () => setState(() => _showCompletedPassengers = !_showCompletedPassengers),
+            borderRadius: BorderRadius.circular(12),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.35),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.white24, width: 1.1),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.check_circle_outline, color: Color(0xFF52B788), size: 18),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      isPLtoDE
+                          ? 'Dowiezieni do domów (${completedStops.length})'
+                          : 'Obsłużeni pasażerowie (${completedStops.length})',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                        color: Colors.white70,
+                      ),
+                    ),
+                  ),
+                  Icon(
+                    _showCompletedPassengers ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                    color: Colors.white54,
+                    size: 20,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (_showCompletedPassengers) ...[
+            const SizedBox(height: 6),
+            ...completedStops.map((stop) => _buildPassengerCard(stop, isPLtoDE)),
+          ],
+        ],
+        const SizedBox(height: 24),
+      ],
+    );
+  }
+
+  Widget _buildNextStopHeroCard(BusRoute route, bool isPLtoDE, PassengerStop? currentTarget) {
+    if (currentTarget == null) {
+      return Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1B4332).withValues(alpha: 0.70),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFF2D6A4F), width: 1.4),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.check_circle, color: Color(0xFF52B788), size: 28),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    isPLtoDE
+                        ? 'Wszyscy pasażerowie dowiezieni do domów!'
+                        : 'Wszyscy pasażerowie dowiezieni do hoteli!',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  const Text(
+                    'Kurs na tym kierunku został pomyślnie zrealizowany.',
+                    style: TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       );
+    }
+
+    final isSundayHomePickup = !isPLtoDE && currentTarget.status == PickupStatus.pending;
+
+    return Container(
+      decoration: _convexDecoration(
+        borderRadius: BorderRadius.circular(16),
+        borderColor: AppColors.brandingOrange.withValues(alpha: 0.90),
+        borderWidth: 1.8,
+        isHighlighted: true,
+      ),
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Imię i nazwisko pasażera + ikony zadzwoń, nawiguj + pastylka dowieziono/odebrano
+          Row(
+            children: [
+              Expanded(
+                child: Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        currentTarget.name,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (currentTarget.passengerCount > 1) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.black45,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          '👥 ${currentTarget.passengerCount}',
+                          style: const TextStyle(fontSize: 11, color: Colors.amber, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              if (currentTarget.phone.isNotEmpty) ...[
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
+                  icon: const Icon(Icons.phone, size: 20, color: Colors.greenAccent),
+                  tooltip: 'Zadzwoń (${currentTarget.phone})',
+                  onPressed: () => LauncherService.openPhone(
+                    context,
+                    currentTarget.phone,
+                    currentTarget.name,
+                  ),
+                ),
+                const SizedBox(width: 2),
+              ],
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
+                icon: const Icon(Icons.navigation, size: 20, color: AppColors.brandingOrange),
+                tooltip: 'Nawiguj do celu',
+                onPressed: () => LauncherService.openNavigation(
+                  context,
+                  currentTarget.address,
+                ),
+              ),
+              const SizedBox(width: 6),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF2D6A4F),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  visualDensity: VisualDensity.compact,
+                  minimumSize: const Size(0, 32),
+                ),
+                onPressed: () {
+                  _updatePassengerStatus(
+                    currentTarget,
+                    isPLtoDE
+                        ? PickupStatus.delivered
+                        : (isSundayHomePickup ? PickupStatus.pickedUp : PickupStatus.delivered),
+                  );
+                },
+                child: Text(
+                  isPLtoDE
+                      ? 'Dowieziono'
+                      : (isSundayHomePickup ? 'Odebrano' : 'Dowieziono'),
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+
+          // Szczegóły trasy i godzin
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.35),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.white12, width: 1.1),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (isPLtoDE) ...[
+                  // 1. Odbiór z hotelu + Nazwa hotelu + Godzina odbioru
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(7),
+                        decoration: BoxDecoration(
+                          color: Colors.amber.withValues(alpha: 0.18),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(Icons.hotel_rounded, size: 20, color: Colors.amber),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'ODBIÓR Z HOTELU',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 0.5,
+                                color: AppColors.gray,
+                              ),
+                            ),
+                            const SizedBox(height: 1),
+                            Text(
+                              currentTarget.resort.isNotEmpty ? currentTarget.resort : 'Hotel w Polsce',
+                              style: const TextStyle(
+                                fontSize: 14.5,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.amber.withValues(alpha: 0.18),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.amber.withValues(alpha: 0.45)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.access_time_filled, size: 13, color: Colors.amber),
+                            const SizedBox(width: 5),
+                            Text(
+                              currentTarget.hotelTime ?? '--:--',
+                              style: const TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.amber,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 8),
+                    child: Divider(height: 1, color: Colors.white12),
+                  ),
+
+                  // 2. Adres domowy (Niemcy)
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(7),
+                        decoration: BoxDecoration(
+                          color: AppColors.brandingOrange.withValues(alpha: 0.18),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(Icons.home_rounded, size: 20, color: AppColors.brandingOrange),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'ADRES DOMOWY (NIEMCY)',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 0.5,
+                                color: AppColors.gray,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              currentTarget.address,
+                              style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.white,
+                                height: 1.25,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 8),
+                    child: Divider(height: 1, color: Colors.white12),
+                  ),
+
+                  // 3. Planowany dojazd do domu godzina
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(7),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF27AE60).withValues(alpha: 0.18),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(Icons.flag_rounded, size: 20, color: Color(0xFF52B788)),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'PLANOWANY DOJAZD DO DOMU',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 0.5,
+                                color: AppColors.gray,
+                              ),
+                            ),
+                            if (currentTarget.driveTime != null || currentTarget.distance != null)
+                              Text(
+                                '${currentTarget.driveTime ?? ''}${currentTarget.distance != null ? " • ${currentTarget.distance}" : ""}',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.white.withValues(alpha: 0.65),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF27AE60).withValues(alpha: 0.22),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: const Color(0xFF27AE60).withValues(alpha: 0.5)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.schedule, size: 14, color: Color(0xFF52B788)),
+                            const SizedBox(width: 5),
+                            Text(
+                              currentTarget.homeTime ?? '--:--',
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF52B788),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ] else ...[
+                  // Niedziela: Odbiór z adresu domowego ➔ Dojazd do hotelu
+                  // 1. Adres domowy + Godzina odbioru z domu
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(7),
+                        decoration: BoxDecoration(
+                          color: AppColors.brandingOrange.withValues(alpha: 0.18),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(Icons.home_rounded, size: 20, color: AppColors.brandingOrange),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'ODBIÓR Z ADRESU DOMOWEGO (NIEMCY)',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 0.5,
+                                color: AppColors.gray,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              currentTarget.address,
+                              style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.white,
+                                height: 1.25,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: AppColors.brandingOrange.withValues(alpha: 0.18),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: AppColors.brandingOrange.withValues(alpha: 0.45)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.access_time_filled, size: 13, color: AppColors.brandingOrange),
+                            const SizedBox(width: 5),
+                            Text(
+                              currentTarget.homeTime ?? '--:--',
+                              style: const TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.brandingOrange,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 8),
+                    child: Divider(height: 1, color: Colors.white12),
+                  ),
+
+                  // 2. Hotel docelowy w Polsce + Planowany dojazd do hotelu
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(7),
+                        decoration: BoxDecoration(
+                          color: Colors.blueAccent.withValues(alpha: 0.18),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(Icons.hotel_rounded, size: 20, color: Colors.blueAccent),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'HOTEL DOCELOWY W POLSCE',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 0.5,
+                                color: AppColors.gray,
+                              ),
+                            ),
+                            const SizedBox(height: 1),
+                            Text(
+                              currentTarget.resort.isNotEmpty ? currentTarget.resort : 'Hotel w Polsce',
+                              style: const TextStyle(
+                                fontSize: 14.5,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
+                            ),
+                            if (currentTarget.driveTime != null || currentTarget.distance != null)
+                              Text(
+                                '${currentTarget.driveTime ?? ''}${currentTarget.distance != null ? " • ${currentTarget.distance}" : ""}',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.white.withValues(alpha: 0.65),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.blueAccent.withValues(alpha: 0.22),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.blueAccent.withValues(alpha: 0.5)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.schedule, size: 14, color: Colors.lightBlueAccent),
+                            const SizedBox(width: 5),
+                            Text(
+                              currentTarget.hotelTime ?? '--:--',
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.lightBlueAccent,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+          if (currentTarget.comment.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: const Color(0xFFC10801).withValues(alpha: 0.25),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: const Color(0xFFC10801).withValues(alpha: 0.5)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.info_outline, size: 13, color: Color(0xFFFF8A80)),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      'Uwagi: ${currentTarget.comment}',
+                      style: const TextStyle(fontSize: 11.5, color: Color(0xFFFF8A80), fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // TAB 1: POJAZD & PALIWO
+  Widget _buildVehicleAndFuelTab(BusRoute route, bool isPLtoDE) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 36),
+      children: [
+        // Karta pojazdu i kierowcy
+        _buildVehicleCard(route, isPLtoDE),
+        const SizedBox(height: 14),
+
+        // Liczniki kilometrów (START / STOP / PRZEBIEG)
+        _buildOdometerCard(route),
+        const SizedBox(height: 14),
+
+        // Moduł tankowań i paliwa
+        _buildRefuelingsModule(route),
+        const SizedBox(height: 24),
+      ],
+    );
+  }
+
+  Widget _buildRefuelingsModule(BusRoute route) {
+    return Container(
+      decoration: _convexDecoration(
+        borderRadius: BorderRadius.circular(16),
+      ),
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Row(
+                children: [
+                  Icon(Icons.local_gas_station, color: AppColors.brandingOrange, size: 20),
+                  SizedBox(width: 8),
+                  Text(
+                    'Paliwo i Tankowania',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
+              FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppColors.brandingOrange,
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  visualDensity: VisualDensity.compact,
+                ),
+                icon: const Icon(Icons.add, size: 16),
+                label: const Text('Dodaj tankowanie', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                onPressed: _showAddRefuelingDialog,
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // Kafelki podsumowania zużycia
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.30),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: _borderColor),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                Column(
+                  children: [
+                    const Text('Diesel (ON)', style: TextStyle(fontSize: 11, color: Colors.white60)),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${route.totalDieselLiters.toStringAsFixed(1)} L',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppColors.brandingOrange),
+                    ),
+                  ],
+                ),
+                Container(height: 24, width: 1, color: Colors.white12),
+                Column(
+                  children: [
+                    const Text('AdBlue', style: TextStyle(fontSize: 11, color: Colors.white60)),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${route.totalAdBlueLiters.toStringAsFixed(1)} L',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.blueAccent),
+                    ),
+                  ],
+                ),
+                Container(height: 24, width: 1, color: Colors.white12),
+                Column(
+                  children: [
+                    const Text('Śr. spalanie ON', style: TextStyle(fontSize: 11, color: Colors.white60)),
+                    const SizedBox(height: 2),
+                    Text(
+                      route.averageConsumptionLPer100Km != null
+                          ? '${route.averageConsumptionLPer100Km!.toStringAsFixed(2)} l'
+                          : '—',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.white),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (route.refuelings.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Center(
+                child: Text(
+                  'Brak zarejestrowanych tankowań na tej trasie.',
+                  style: TextStyle(fontSize: 12.5, color: Colors.white.withValues(alpha: 0.6)),
+                ),
+              ),
+            )
+          else ...[
+            const Text(
+              'Historia tankowań:',
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white70),
+            ),
+            const SizedBox(height: 6),
+            ...route.refuelings.map((ref) {
+              final isAdBlue = ref.fuelType == 'AdBlue';
+              return Card(
+                elevation: 0,
+                margin: const EdgeInsets.symmetric(vertical: 4),
+                color: _cardBg,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  side: BorderSide(color: _borderColor),
+                ),
+                child: ListTile(
+                  dense: true,
+                  leading: CircleAvatar(
+                    radius: 14,
+                    backgroundColor: isAdBlue ? Colors.blue.shade100 : (_isDark ? AppColors.darkCard : AppColors.primary),
+                    child: Icon(
+                      isAdBlue ? Icons.water_drop : Icons.ev_station,
+                      color: isAdBlue ? Colors.blue.shade800 : Colors.white,
+                      size: 14,
+                    ),
+                  ),
+                  title: Row(
+                    children: [
+                      Text(
+                        '${ref.liters.toStringAsFixed(1)} L • ${ref.amount.toStringAsFixed(2)} ${ref.currency}',
+                        style: TextStyle(fontWeight: FontWeight.bold, color: _textPrimary),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: isAdBlue ? Colors.blue.shade50 : AppColors.brandingOrange.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(
+                            color: isAdBlue ? Colors.blue.shade200 : AppColors.brandingOrange.withValues(alpha: 0.3),
+                          ),
+                        ),
+                        child: Text(
+                          ref.fuelType,
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                            color: isAdBlue ? Colors.blue.shade900 : AppColors.brandingOrange,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  subtitle: Text(
+                    '${ref.stationName} (${ref.paymentMethod}) @ ${ref.odometerKm} km',
+                    style: TextStyle(color: _textSecondary),
+                  ),
+                  trailing: IconButton(
+                    icon: const Icon(Icons.delete_outline, size: 18, color: Colors.red),
+                    onPressed: () {
+                      setState(() {
+                        route.refuelings.removeWhere((r) => r.id == ref.id);
+                      });
+                      StorageService.saveRefuelings(route.id, route.refuelings);
+                    },
+                  ),
+                ),
+              );
+            }),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // TAB 2: RAPORTY & CZAS
+  Widget _buildReportsAndWorkTimeTab(BusRoute route, bool isPLtoDE) {
+    final summary = _getWeekendTripSummaryForCurrentBus();
+    final isBreakActive = route.activeBreak != null;
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 36),
+      children: [
+        // 1. Moduł Przerw i Czasu Pracy Kierowcy
+        Container(
+          decoration: _convexDecoration(
+            borderRadius: BorderRadius.circular(16),
+            isHighlighted: isBreakActive,
+            borderColor: isBreakActive ? const Color(0xFFC84031) : null,
+          ),
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        isBreakActive ? Icons.timer : Icons.coffee,
+                        color: isBreakActive ? const Color(0xFFE57373) : AppColors.brandingOrange,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 8),
+                      const Text(
+                        'Czas Pracy & Pauzy',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ],
+                  ),
+                  FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: isBreakActive ? const Color(0xFFC10801) : AppColors.brandingOrange,
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    icon: Icon(isBreakActive ? Icons.stop : Icons.play_arrow, size: 16),
+                    label: Text(
+                      isBreakActive ? 'Koniec pauzy' : 'Rozpocznij pauzę',
+                      style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold),
+                    ),
+                    onPressed: _toggleDriverBreak,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              if (isBreakActive) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF8B251B).withValues(alpha: 0.40),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFFC84031)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.coffee, color: Colors.white, size: 28),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              '☕ TRWA PRZERWA KIEROWCY',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                                letterSpacing: 0.3,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'Rozpoczęto o ${_formatTime(route.activeBreak!.startTime)} (trwa ${DateTime.now().difference(route.activeBreak!.startTime).inMinutes} min)',
+                              style: const TextStyle(fontSize: 12, color: Colors.white70),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
+              ],
+              Text(
+                'Zarejestrowane przerwy (${route.breaks.length} • łącznie: ${route.totalBreakMinutes} min):',
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white70),
+              ),
+              if (route.breaks.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Text(
+                    'Brak zarejestrowanych przerw w tym kursie.',
+                    style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.5)),
+                  ),
+                )
+              else
+                ...route.breaks.map((b) {
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 3),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.check_circle_outline, size: 14, color: AppColors.brandingOrange),
+                        const SizedBox(width: 6),
+                        Text(
+                          '${_formatTime(b.startTime)} - ${b.endTime != null ? _formatTime(b.endTime!) : "w toku"} (${b.durationMinutes} min)',
+                          style: const TextStyle(fontSize: 12.5, color: Colors.white),
+                        ),
+                      ],
+                    ),
+                  );
+                }),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+
+        // 2. Moduł Finansów i Rozliczenia
+        Container(
+          decoration: _convexDecoration(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(Icons.payments_outlined, color: AppColors.brandingOrange, size: 20),
+                      SizedBox(width: 8),
+                      Text(
+                        'Zaliczka i Finanse',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ],
+                  ),
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      side: const BorderSide(color: AppColors.brandingOrange),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    icon: const Icon(Icons.edit, size: 14, color: AppColors.brandingOrange),
+                    label: const Text('Edytuj', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                    onPressed: () => _showEditFinancialsDialog(() => setState(() {})),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.30),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: _borderColor),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('ZALICZKA:', style: TextStyle(fontSize: 11, color: Colors.white60)),
+                        const SizedBox(height: 3),
+                        Text(
+                          '${summary.advanceEur.toStringAsFixed(2)} €',
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white),
+                        ),
+                        Text(
+                          '${summary.advancePln.toStringAsFixed(2)} zł',
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white),
+                        ),
+                      ],
+                    ),
+                    Container(height: 36, width: 1, color: Colors.white12),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('ODEBRANE:', style: TextStyle(fontSize: 11, color: Colors.white60)),
+                        const SizedBox(height: 3),
+                        Text(
+                          '${summary.cashCollectedEur.toStringAsFixed(2)} €',
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.greenAccent),
+                        ),
+                        Text(
+                          '${summary.cashCollectedPln.toStringAsFixed(2)} zł',
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.greenAccent),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+
+        // 3. Centrum Raportowania i Zakończenia Kursu
+        Container(
+          decoration: _convexDecoration(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Row(
+                children: [
+                  Icon(Icons.assignment, color: AppColors.brandingOrange, size: 20),
+                  SizedBox(width: 8),
+                  Text(
+                    'Centrum Raportowania',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              // Przycisk Plan Jazdy
+              _buildReportActionRow(
+                icon: Icons.assignment_outlined,
+                accentColor: AppColors.brandingOrange,
+                title: 'Otwórz pełny Plan Jazdy',
+                subtitle: 'Kompletne podsumowanie weekendu, tabelka km i rozliczenie',
+                onTap: _showPlanJazdyDialog,
+              ),
+              const SizedBox(height: 8),
+              // Zapisz Word
+              _buildReportActionRow(
+                icon: Icons.description_outlined,
+                accentColor: Colors.blueAccent,
+                title: 'Zapisz raport Word (.docx)',
+                subtitle: 'Generuje oficjalny plik rozliczenia zgodny ze wzorcem',
+                onTap: () => DocxReportService.savePlanJazdyDocxToDesktop(context, summary),
+              ),
+              const SizedBox(height: 8),
+              // Wyślij WhatsApp
+              _buildReportActionRow(
+                icon: Icons.chat_outlined,
+                accentColor: const Color(0xFF25D366),
+                title: 'Wyślij raport na WhatsApp',
+                subtitle: 'Prześlij tekstowe podsumowanie kursu na czat firmowy',
+                onTap: () {
+                  final text = ReportService.generatePlanJazdyText(summary);
+                  ReportService.sendViaWhatsApp(context, text);
+                },
+              ),
+              const Divider(height: 24, color: Colors.white12),
+              // Zakończ kurs
+              _buildReportActionRow(
+                icon: Icons.flag_outlined,
+                accentColor: const Color(0xFFC10801),
+                title: 'Zakończ kurs i wyczyść dane',
+                subtitle: 'Trwale wyczyść dane bieżącego wyjazdu i przygotuj aplikację na nowy rozkład',
+                onTap: _confirmFinishTrip,
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 24),
+      ],
+    );
+  }
+
+  Widget _buildReportActionRow({
+    required IconData icon,
+    required Color accentColor,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.25),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: accentColor.withValues(alpha: 0.35), width: 1.1),
+          ),
+          child: Row(
+            children: [
+              CircleAvatar(
+                radius: 16,
+                backgroundColor: accentColor.withValues(alpha: 0.18),
+                child: Icon(icon, size: 18, color: accentColor),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.white.withValues(alpha: 0.65),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.arrow_forward_ios, size: 12, color: Colors.white54),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   BoxDecoration _convexDecoration({
@@ -1691,137 +2837,8 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
             color: borderCol.withValues(alpha: isHighlighted ? 0.35 : 0.15),
             blurRadius: 2,
             offset: const Offset(0, -1),
-          ),
-      ],
-    );
-  }
-
-  Widget _buildQuickActionsBar(BusRoute route) {
-    final isBreakActive = route.activeBreak != null;
-
-    return Row(
-      children: [
-        // Pastylka Pauza
-        Expanded(
-          child: _buildActionPill(
-            label: isBreakActive
-                ? 'Koniec pauzy'
-                : (route.breaks.isNotEmpty ? 'Pauza (${route.breaks.length})' : 'Pauza'),
-            icon: isBreakActive ? Icons.stop_circle_outlined : Icons.coffee,
-            isActive: isBreakActive,
-            onTap: _toggleDriverBreak,
-          ),
-        ),
-        const SizedBox(width: 8),
-
-        // Pastylka Paliwo
-        Expanded(
-          child: _buildActionPill(
-            label: route.refuelings.isNotEmpty
-                ? 'Paliwo (${route.refuelings.length})'
-                : 'Paliwo',
-            icon: Icons.local_gas_station,
-            onTap: _showRefuelingsSheet,
-          ),
-        ),
-        const SizedBox(width: 8),
-
-        // Pastylka Plan Jazdy
-        Expanded(
-          child: _buildActionPill(
-            label: 'Plan Jazdy',
-            icon: Icons.assignment,
-            onTap: _showPlanJazdyDialog,
-          ),
         ),
       ],
-    );
-  }
-
-  Widget _buildActionPill({
-    required String label,
-    required IconData icon,
-    required VoidCallback onTap,
-    bool isActive = false,
-  }) {
-    final theme = AppColors.activeTheme;
-
-    // Pełna spójność kolorystyczna z aktywnym motywem
-    final Gradient gradient = isActive
-        ? const LinearGradient(
-            begin: Alignment.centerLeft,
-            end: Alignment.centerRight,
-            colors: [Color(0xFF8B251B), Color(0xFFC84031)],
-          )
-        : LinearGradient(
-            begin: Alignment.centerLeft,
-            end: Alignment.centerRight,
-            colors: [
-              theme.boxStart.withValues(alpha: 0.90),
-              theme.boxEnd.withValues(alpha: 0.75),
-            ],
-          );
-
-    final Border border = Border.all(
-      color: isActive
-          ? Colors.white
-          : theme.border.withValues(alpha: 0.50),
-      width: isActive ? 1.4 : 1.1,
-    );
-
-    final List<BoxShadow> shadows = [
-      BoxShadow(
-        color: Colors.black.withValues(alpha: 0.40),
-        blurRadius: 8,
-        offset: const Offset(0, 3),
-      ),
-      if (isActive)
-        BoxShadow(
-          color: const Color(0xFFC84031).withValues(alpha: 0.45),
-          blurRadius: 10,
-          offset: const Offset(0, 2),
-        ),
-    ];
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(22),
-        child: Container(
-          height: 40,
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          decoration: BoxDecoration(
-            gradient: gradient,
-            borderRadius: BorderRadius.circular(22),
-            border: border,
-            boxShadow: shadows,
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                icon,
-                size: 16,
-                color: isActive ? Colors.white : theme.secondaryAccent,
-              ),
-              const SizedBox(width: 5),
-              Flexible(
-                child: Text(
-                  label,
-                  style: const TextStyle(
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                    letterSpacing: 0.2,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
     );
   }
 
@@ -2067,16 +3084,24 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
     );
   }
 
-  Widget _buildDaySelector() {
+  Widget _buildDaySelector(BusRoute route) {
     final dates = _availableDates;
+    final isBreakActive = route.activeBreak != null;
+
     if (dates.length < 2) {
-      return const SizedBox.shrink();
+      return Row(
+        children: [
+          const Spacer(),
+          _buildBreakPill(route, isBreakActive),
+        ],
+      );
     }
 
     return Row(
       children: [
         // Pastylka Sobota
         Expanded(
+          flex: 4,
           child: _buildDayPill(
             label: 'Sobota (${_shortDate(dates[0])})',
             icon: Icons.flight_takeoff,
@@ -2087,10 +3112,11 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
             },
           ),
         ),
-        const SizedBox(width: 8),
+        const SizedBox(width: 6),
 
         // Pastylka Niedziela
         Expanded(
+          flex: 4,
           child: _buildDayPill(
             label: 'Niedziela (${_shortDate(dates[1])})',
             icon: Icons.flight_land,
@@ -2101,7 +3127,78 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
             },
           ),
         ),
+        const SizedBox(width: 6),
+
+        // Pastylka Pauzy Kierowcy
+        _buildBreakPill(route, isBreakActive),
       ],
+    );
+  }
+
+  Widget _buildBreakPill(BusRoute route, bool isBreakActive) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: _toggleDriverBreak,
+        borderRadius: BorderRadius.circular(22),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          height: 40,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(22),
+            gradient: isBreakActive
+                ? const LinearGradient(
+                    colors: [Color(0xFFC10801), Color(0xFFE53935)],
+                    begin: Alignment.centerLeft,
+                    end: Alignment.centerRight,
+                  )
+                : LinearGradient(
+                    colors: [
+                      const Color(0xFF3E2723).withValues(alpha: 0.90),
+                      const Color(0xFF4E342E).withValues(alpha: 0.85),
+                    ],
+                    begin: Alignment.centerLeft,
+                    end: Alignment.centerRight,
+                  ),
+            border: Border.all(
+              color: isBreakActive
+                  ? Colors.redAccent.withValues(alpha: 0.95)
+                  : Colors.amber.withValues(alpha: 0.60),
+              width: isBreakActive ? 1.6 : 1.1,
+            ),
+            boxShadow: isBreakActive
+                ? [
+                    BoxShadow(
+                      color: Colors.red.withValues(alpha: 0.45),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ]
+                : null,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                isBreakActive ? Icons.timer : Icons.coffee,
+                size: 16,
+                color: isBreakActive ? Colors.white : Colors.amber,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                isBreakActive ? 'Koniec pauzy' : 'Pauza',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: isBreakActive ? Colors.white : Colors.amber.shade200,
+                  letterSpacing: 0.3,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -2691,6 +3788,36 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                             ],
                           ],
                         ),
+                        if (stop.hotelTime != null || stop.homeTime != null) ...[
+                          const SizedBox(height: 3),
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.access_time_rounded,
+                                size: 11,
+                                color: isDelivered
+                                    ? (_isDark ? Colors.white38 : Colors.grey.shade500)
+                                    : AppColors.brandingOrange,
+                              ),
+                              const SizedBox(width: 4),
+                              Expanded(
+                                child: Text(
+                                  isPLtoDE
+                                      ? 'Hotel ${stop.hotelTime ?? "--:--"} ➔ Dom ${stop.homeTime ?? "--:--"}'
+                                      : 'Dom ${stop.homeTime ?? "--:--"} ➔ Hotel ${stop.hotelTime ?? "--:--"}${stop.resort.isNotEmpty ? " (${stop.resort})" : ""}',
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: isDelivered
+                                        ? (_isDark ? Colors.white38 : Colors.grey.shade600)
+                                        : _textPrimary,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -2907,17 +4034,136 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                   ),
                 ],
 
-                // Czas i odległość jeśli dostępne
-                if (stop.driveTime != null || stop.distance != null) ...[
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      const SizedBox(width: 22),
-                      Text(
-                        '${stop.driveTime ?? ''} • ${stop.distance ?? ''}',
-                        style: const TextStyle(fontSize: 11, color: AppColors.gray),
-                      ),
-                    ],
+                // Harmonogram godzin i szacowany czas
+                if (stop.hotelTime != null ||
+                    stop.homeTime != null ||
+                    stop.driveTime != null ||
+                    stop.distance != null) ...[
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: _isDark
+                          ? Colors.white.withValues(alpha: 0.04)
+                          : Colors.black.withValues(alpha: 0.03),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: _borderColor.withValues(alpha: 0.6)),
+                    ),
+                    child: Column(
+                      children: [
+                        if (stop.hotelTime != null || stop.homeTime != null)
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      isPLtoDE ? Icons.hotel_rounded : Icons.home_rounded,
+                                      size: 15,
+                                      color: AppColors.brandingOrange,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          isPLtoDE ? 'ODJAZD Z HOTELU' : 'ODBIÓR Z DOMU',
+                                          style: const TextStyle(
+                                            fontSize: 9,
+                                            fontWeight: FontWeight.bold,
+                                            color: AppColors.gray,
+                                          ),
+                                        ),
+                                        Text(
+                                          (isPLtoDE ? stop.hotelTime : stop.homeTime) ?? '--:--',
+                                          style: TextStyle(
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.bold,
+                                            color: _textPrimary,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Icon(
+                                Icons.arrow_forward_rounded,
+                                size: 16,
+                                color: AppColors.gray.withValues(alpha: 0.6),
+                              ),
+                              Expanded(
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.end,
+                                  children: [
+                                    Column(
+                                      crossAxisAlignment: CrossAxisAlignment.end,
+                                      children: [
+                                        Text(
+                                          isPLtoDE ? 'DOJAZD DO DOMU' : 'DOJAZD DO HOTELU',
+                                          style: const TextStyle(
+                                            fontSize: 9,
+                                            fontWeight: FontWeight.bold,
+                                            color: AppColors.gray,
+                                          ),
+                                        ),
+                                        Text(
+                                          (isPLtoDE ? stop.homeTime : stop.hotelTime) ?? '--:--',
+                                          style: TextStyle(
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.bold,
+                                            color: _textPrimary,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Icon(
+                                      isPLtoDE ? Icons.home_rounded : Icons.hotel_rounded,
+                                      size: 15,
+                                      color: const Color(0xFF27AE60),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        if (stop.driveTime != null || stop.distance != null) ...[
+                          if (stop.hotelTime != null || stop.homeTime != null) ...[
+                            const SizedBox(height: 6),
+                            Divider(height: 1, color: _borderColor.withValues(alpha: 0.5)),
+                            const SizedBox(height: 6),
+                          ],
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              if (stop.driveTime != null)
+                                Row(
+                                  children: [
+                                    const Icon(Icons.timer_outlined, size: 12, color: AppColors.gray),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      'Czas jazdy: ${stop.driveTime}',
+                                      style: const TextStyle(fontSize: 11, color: AppColors.gray),
+                                    ),
+                                  ],
+                                ),
+                              if (stop.distance != null)
+                                Row(
+                                  children: [
+                                    const Icon(Icons.straighten, size: 12, color: AppColors.gray),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      stop.distance!,
+                                      style: const TextStyle(fontSize: 11, color: AppColors.gray),
+                                    ),
+                                  ],
+                                ),
+                            ],
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
                 ],
 

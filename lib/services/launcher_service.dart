@@ -176,17 +176,39 @@ class LauncherService {
     }
 
     final query = Uri.encodeComponent(cleanAddress);
-    final googleMapsUrl = Uri.parse('https://www.google.com/maps/search/?api=1&query=$query');
+
+    // 1. Android: uniwersalny protokół geo: -> system pyta użytkownika o wybór aplikacji
+    //    (np. Mapy Google, Waze, Yanosik, itp.)
+    final geoUri = Uri.parse('geo:0,0?q=$query');
+
+    // 2. iOS: natywny protokół maps: (Apple Maps z opcją systemową)
+    final appleMapsUri = Uri.parse('maps:?q=$query');
+
+    // 3. Fallback uniwersalny WWW: Google Maps
+    final webMapsUri = Uri.parse('https://www.google.com/maps/search/?api=1&query=$query');
 
     try {
-      final success = await launchUrl(googleMapsUrl, mode: LaunchMode.externalApplication);
+      // Próba 1: geo: (Android system chooser)
+      if (await canLaunchUrl(geoUri)) {
+        final success = await launchUrl(geoUri, mode: LaunchMode.externalApplication);
+        if (success) return true;
+      }
+
+      // Próba 2: maps: (iOS Apple Maps)
+      if (await canLaunchUrl(appleMapsUri)) {
+        final success = await launchUrl(appleMapsUri, mode: LaunchMode.externalApplication);
+        if (success) return true;
+      }
+
+      // Próba 3: Google Maps web / app
+      final success = await launchUrl(webMapsUri, mode: LaunchMode.externalApplication);
       if (!success && context.mounted) {
         _showNotice(context, 'Nie udało się otworzyć mapy.', Icons.error);
       }
       return success;
     } catch (e) {
       if (context.mounted) {
-        _showNotice(context, 'Błąd uruchamiania mapy: $e', Icons.error);
+        _showNotice(context, 'Błąd uruchamiania nawigacji: $e', Icons.error);
       }
       return false;
     }

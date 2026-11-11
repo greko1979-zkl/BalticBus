@@ -115,6 +115,43 @@ class ExcelParserService {
     final List<String> specialNotes = [];
     final List<TransferPoint> transferPoints = [];
 
+    // Dynamicznie szukamy wiersza nagłówka kolumn (np. "Imie i nazwisko", "Hotel", "Adres")
+    int? headerRow;
+    for (int r = startRow; r < endRow && r < startRow + 10; r++) {
+      final val = _getVal(rows, r, offset + 1).toLowerCase();
+      if (val.contains('imie') || val.contains('nazwisko')) {
+        headerRow = r;
+        break;
+      }
+    }
+
+    int colResort = offset + 7;
+    int colHotelTime = offset + 8;
+    int colHomeTime = offset + 9;
+    int colDriveTime = offset + 10;
+    int colDistance = offset + 11;
+
+    if (headerRow != null && headerRow < rows.length) {
+      final hRow = rows[headerRow];
+      final maxCol = offset + 13;
+      for (int c = offset; c < maxCol && c < hRow.length; c++) {
+        final title = (hRow[c]?.value?.toString() ?? '').toLowerCase().trim();
+        if (title.contains('osrodek') || title.contains('ośrodek') || title.contains('sanatorium')) {
+          colResort = c;
+        } else if (title.contains('hotel')) {
+          colHotelTime = c;
+        } else if ((title.contains('adres') && c > offset + 3) ||
+                   title.contains('dom') ||
+                   title.contains('godz')) {
+          colHomeTime = c;
+        } else if (title.contains('czas')) {
+          colDriveTime = c;
+        } else if (title.contains('odlegl') || title.contains('km')) {
+          colDistance = c;
+        }
+      }
+    }
+
     // Przeszukujemy wiersze wewnątrz bloku
     for (int r = startRow + 2; r < endRow; r++) {
       final colOrderOrNote = _getVal(rows, r, offset);
@@ -128,9 +165,11 @@ class ExcelParserService {
         final phone = _getVal(rows, r, offset + 4);
         final comment = _getVal(rows, r, offset + 5);
         final office = _getVal(rows, r, offset + 6);
-        final resort = _getVal(rows, r, offset + 7);
-        final driveTime = _getVal(rows, r, offset + 10);
-        final distance = _getVal(rows, r, offset + 11);
+        final resort = _getVal(rows, r, colResort);
+        final hotelTime = _extractTime(_getCell(rows, r, colHotelTime));
+        final homeTime = _extractTime(_getCell(rows, r, colHomeTime));
+        final driveTime = _getVal(rows, r, colDriveTime);
+        final distance = _getVal(rows, r, colDistance);
 
         stops.add(
           PassengerStop(
@@ -142,6 +181,8 @@ class ExcelParserService {
             comment: comment,
             office: office,
             resort: resort,
+            hotelTime: hotelTime,
+            homeTime: homeTime,
             driveTime: driveTime.isNotEmpty ? driveTime : null,
             distance: distance.isNotEmpty ? distance : null,
           ),
@@ -235,5 +276,75 @@ class ExcelParserService {
       return '+49 $raw';
     }
     return raw;
+  }
+
+  static Data? _getCell(List<List<Data?>> rows, int r, int c) {
+    if (r < 0 || r >= rows.length) return null;
+    final row = rows[r];
+    if (c < 0 || c >= row.length) return null;
+    return row[c];
+  }
+
+  static String? _extractTime(Data? cell) {
+    if (cell == null || cell.value == null) return null;
+    final val = cell.value;
+
+    if (val is TimeCellValue) {
+      return '${val.hour.toString().padLeft(2, '0')}:${val.minute.toString().padLeft(2, '0')}';
+    }
+
+    if (val is DateTimeCellValue) {
+      return '${val.hour.toString().padLeft(2, '0')}:${val.minute.toString().padLeft(2, '0')}';
+    }
+
+    if (val is DoubleCellValue) {
+      final d = val.value;
+      if (d > 0.0 && d < 1.0) {
+        final totalMinutes = (d * 24 * 60).round() % (24 * 60);
+        final h = totalMinutes ~/ 60;
+        final m = totalMinutes % 60;
+        return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
+      }
+    }
+
+    final str = val.toString().trim();
+    if (str.isEmpty) return null;
+
+    final isoMatch = RegExp(r'T(\d{1,2}):(\d{2})').firstMatch(str);
+    if (isoMatch != null) {
+      final h = int.parse(isoMatch.group(1)!);
+      final m = isoMatch.group(2)!;
+      return '${h.toString().padLeft(2, '0')}:$m';
+    }
+
+    final timeMatch = RegExp(r'\b(\d{1,2})[:.](\d{2})(?::\d{2})?\b').firstMatch(str);
+    if (timeMatch != null) {
+      final h = int.parse(timeMatch.group(1)!);
+      final m = timeMatch.group(2)!;
+      return '${h.toString().padLeft(2, '0')}:$m';
+    }
+
+    final parsedDouble = double.tryParse(str);
+    if (parsedDouble != null && parsedDouble > 0.0 && parsedDouble < 1.0) {
+      final totalMinutes = (parsedDouble * 24 * 60).round() % (24 * 60);
+      final h = totalMinutes ~/ 60;
+      final m = totalMinutes % 60;
+      return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
+    }
+
+    return _cleanTime(str);
+  }
+
+  static String? _cleanTime(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) return null;
+    // Np. 08:00:00 -> 08:00 lub 8:00 -> 08:00
+    final match = RegExp(r'^(\d{1,2})[:.](\d{2})(?::\d{2})?$').firstMatch(trimmed);
+    if (match != null) {
+      final h = int.parse(match.group(1)!);
+      final m = match.group(2)!;
+      return '${h.toString().padLeft(2, '0')}:$m';
+    }
+    return trimmed;
   }
 }

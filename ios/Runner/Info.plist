@@ -31,6 +31,9 @@
 		<string>tel</string>
 		<string>https</string>
 		<string>http</string>
+		<string>geo</string>
+		<string>maps</string>
+		<string>waze</string>
 	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
