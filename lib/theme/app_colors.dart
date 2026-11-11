@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 enum AppThemeStyle {
+  balticNoir,
+  balticOrange,
   charcoalNoir,
   warmGrey,
   balticOcean,
@@ -39,11 +41,79 @@ class AppThemeData {
 }
 
 class AppColors {
-  // Aktywny motyw kolorystyczny obserwowany w aplikacji (domyślnie Charcoal Noir)
+  // Aktywny motyw kolorystyczny obserwowany w aplikacji (domyślnie Baltic Noir)
   static final ValueNotifier<AppThemeStyle> currentTheme =
-      ValueNotifier<AppThemeStyle>(AppThemeStyle.charcoalNoir);
+      ValueNotifier<AppThemeStyle>(AppThemeStyle.balticNoir);
 
   static const Map<AppThemeStyle, AppThemeData> themes = {
+    // 0. WERSJA GŁÓWNA: BALTIC NOIR (#1E1E1E ⇄ #2C2A28 • #FFE7D0) - stonowana kolorystyka z "Wybierz swój pojazd"
+    AppThemeStyle.balticNoir: AppThemeData(
+      style: AppThemeStyle.balticNoir,
+      title: 'BALTIC NOIR',
+      subtitle: '#1E1E1E • #FFE7D0',
+      boxStart: Color(0xFF1E1E1E),
+      boxEnd: Color(0xFF2C2A28),
+      border: Color(0xFF554D44),
+      primaryAccent: Color(0xFF36322E),
+      secondaryAccent: Color(0xFFFFE7D0),
+      textPrimary: Color(0xFFFFFFFF),
+      textSecondary: Color(0xFFFFE7D0),
+      screenGradient: LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [
+          Color(0xFF141414),
+          Color(0xFF1E1E1E),
+          Color(0xFF232323),
+          Color(0xFF2A2826),
+          Color(0xFF322E2B),
+        ],
+        stops: [0.0, 0.25, 0.50, 0.75, 1.0],
+      ),
+      cardGradient: LinearGradient(
+        begin: Alignment.centerLeft,
+        end: Alignment.centerRight,
+        colors: [
+          Color(0xFF1E1E1E),
+          Color(0xFF2C2A28),
+        ],
+      ),
+    ),
+
+    // 1. WERSJA: BALTIC ORANGE (#1B1B1B ⇄ #323232 • #FFE7D0 • #FC6E20)
+    AppThemeStyle.balticOrange: AppThemeData(
+      style: AppThemeStyle.balticOrange,
+      title: 'BALTIC ORANGE',
+      subtitle: '#1B1B1B • #FC6E20',
+      boxStart: Color(0xFF1B1B1B),
+      boxEnd: Color(0xFF323232),
+      border: Color(0xFFFC6E20),
+      primaryAccent: Color(0xFFFC6E20),
+      secondaryAccent: Color(0xFFFFE7D0),
+      textPrimary: Color(0xFFFFFFFF),
+      textSecondary: Color(0xFFFFE7D0),
+      screenGradient: LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [
+          Color(0xFF0F0F0F),
+          Color(0xFF1B1B1B),
+          Color(0xFF242424),
+          Color(0xFF2C2C2C),
+          Color(0xFF323232),
+        ],
+        stops: [0.0, 0.25, 0.50, 0.75, 1.0],
+      ),
+      cardGradient: LinearGradient(
+        begin: Alignment.centerLeft,
+        end: Alignment.centerRight,
+        colors: [
+          Color(0xFF1B1B1B),
+          Color(0xFF323232),
+        ],
+      ),
+    ),
+
     // 1. WERSJA: CHARCOAL NOIR (#040204 ⇄ #3A3A35) - luksusowy grafit i prawie-czerń
     AppThemeStyle.charcoalNoir: AppThemeData(
       style: AppThemeStyle.charcoalNoir,
@@ -216,7 +286,21 @@ class AppColors {
   };
 
   static AppThemeData get activeTheme =>
-      themes[currentTheme.value] ?? themes[AppThemeStyle.charcoalNoir]!;
+      themes[currentTheme.value] ?? themes[AppThemeStyle.balticNoir]!;
+
+  // Nowa stonowana paleta z "Wybierz swój pojazd" (Baltic Noir)
+  static const Color noirBackground = Color(0xFF1E1E1E);
+  static const Color noirCard = Color(0xFF252525);
+  static const Color noirCardWarm = Color(0xFF2C2A28);
+  static const Color noirButton = Color(0xFF36322E);
+  static const Color noirBorder = Color(0xFF554D44);
+  static const Color noirCream = Color(0xFFFFE7D0);
+
+  // Paleta Baltic Orange (#1B1B1B, #323232, #FFE7D0, #FC6E20)
+  static const Color darkCharcoal = Color(0xFF1B1B1B);
+  static const Color cardCharcoal = Color(0xFF323232);
+  static const Color warmCream = Color(0xFFFFE7D0);
+  static const Color vibrantOrange = Color(0xFFFC6E20);
 
   // Kolory ze wzornika Warm Grey & Charcoal
   static const Color warmGrey = Color(0xFF8C8C7C);
@@ -226,13 +310,13 @@ class AppColors {
 
   // Stałe stałopozycyjne (dla pełnej zgodności z const w projekcie)
   static const Color primary = Color(0xFF216A85);
-  static const Color brandingOrange = Color(0xFFE85002);
-  static const Color darkBackground = Color(0xFF021D24);
-  static const Color darkSurface = Color(0xFF042933);
-  static const Color darkCard = Color(0xFF063442);
-  static const Color darkBorder = Color(0xFF65A7C2);
+  static const Color brandingOrange = Color(0xFFFC6E20);
+  static const Color darkBackground = Color(0xFF1E1E1E);
+  static const Color darkSurface = Color(0xFF252525);
+  static const Color darkCard = Color(0xFF2C2A28);
+  static const Color darkBorder = Color(0xFF554D44);
   static const Color darkTextPrimary = Color(0xFFFFFFFF);
-  static const Color darkTextSecondary = Color(0xFFC7E5F2);
+  static const Color darkTextSecondary = Color(0xFFFFE7D0);
   static const Color darkGray = Color(0xFF093F52);
   static const Color gray = Color(0xFF8BC5DE);
   static const Color lightGray = Color(0xFFC7E5F2);

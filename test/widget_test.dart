@@ -155,8 +155,8 @@ void main() {
     await tester.pump(const Duration(seconds: 4));
     await tester.pumpAndSettle();
 
-    // 3. Verify no active trip screen is displayed (production button is visible)
-    expect(find.text('Brak aktywnego kursu'), findsOneWidget);
+    // 3. Verify no active trip screen is displayed (logo and production button are visible)
+    expect(find.byKey(const ValueKey('balticbus_logo_detector')), findsOneWidget);
     expect(find.text('Rozpocznij przejazd'), findsOneWidget);
 
     // 4. Tap "Rozpocznij przejazd" button to open the import sheet and verify its actions

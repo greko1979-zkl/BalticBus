@@ -36,8 +36,12 @@ void main() async {
     AppColors.currentTheme.value = AppThemeStyle.walnutNoir;
   } else if (savedPalette == 'emeraldDepth') {
     AppColors.currentTheme.value = AppThemeStyle.emeraldDepth;
-  } else {
+  } else if (savedPalette == 'charcoalNoir') {
     AppColors.currentTheme.value = AppThemeStyle.charcoalNoir;
+  } else if (savedPalette == 'balticOrange') {
+    AppColors.currentTheme.value = AppThemeStyle.balticOrange;
+  } else {
+    AppColors.currentTheme.value = AppThemeStyle.balticNoir;
   }
 
   final initialHasActiveTrip = await StorageService.hasActiveTrip();
@@ -200,17 +204,18 @@ class _SplashScreenState extends State<SplashScreen>
                   child: ScaleTransition(
                     scale: _scaleAnimation,
                     child: Container(
-                      width: 320,
-                      height: 120,
+                      width: double.infinity,
+                      constraints: const BoxConstraints(maxWidth: 380),
+                      height: 150,
                       alignment: Alignment.center,
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
                       child: Image.asset(
                         'assets/images/balticbus_logo.png',
                         fit: BoxFit.contain,
                         errorBuilder: (context, error, stackTrace) => const Icon(
                           Icons.directions_bus,
                           color: Colors.white,
-                          size: 64,
+                          size: 72,
                         ),
                       ),
                     ),
@@ -492,21 +497,26 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
       barrierDismissible: false,
       builder: (dialogCtx) => StatefulBuilder(
         builder: (context, setDialogState) {
+          final dialogHeight = MediaQuery.sizeOf(dialogCtx).height * 0.80;
           return Dialog(
-            backgroundColor: const Color(0xFF1B2321),
+            backgroundColor: const Color(0xFF1E1E1E),
+            insetPadding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 24.0),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(18),
-              side: BorderSide(
-                color: AppColors.brandingOrange.withValues(alpha: 0.5),
-                width: 1.4,
+              side: const BorderSide(
+                color: Color(0xFF383838),
+                width: 1.0,
               ),
             ),
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 420, maxHeight: 560),
+              constraints: BoxConstraints(
+                maxWidth: 480,
+                minHeight: dialogHeight,
+                maxHeight: dialogHeight,
+              ),
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(18, 18, 18, 14),
                 child: Column(
-                  mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
@@ -514,10 +524,10 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                         Container(
                           padding: const EdgeInsets.all(8),
                           decoration: BoxDecoration(
-                            color: AppColors.brandingOrange.withValues(alpha: 0.18),
+                            color: const Color(0xFF2C2C2C),
                             borderRadius: BorderRadius.circular(10),
                           ),
-                          child: const Icon(Icons.directions_bus_filled, color: AppColors.brandingOrange, size: 24),
+                          child: const Icon(Icons.directions_bus_filled, color: Color(0xFFFFE7D0), size: 22),
                         ),
                         const SizedBox(width: 12),
                         const Expanded(
@@ -538,7 +548,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                                 'Wybierz busa i kierowcę, aby załadować trasę:',
                                 style: TextStyle(
                                   fontSize: 11.5,
-                                  color: Colors.white70,
+                                  color: Color(0xFFB0B0B0),
                                 ),
                               ),
                             ],
@@ -547,11 +557,10 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                       ],
                     ),
                     const SizedBox(height: 14),
-                    const Divider(height: 1, color: Colors.white12),
+                    const Divider(height: 1, color: Color(0xFF333333)),
                     const SizedBox(height: 10),
-                    Flexible(
+                    Expanded(
                       child: ListView.separated(
-                        shrinkWrap: true,
                         itemCount: busCodes.length,
                         separatorBuilder: (ctx, idx) => const SizedBox(height: 8),
                         itemBuilder: (context, index) {
@@ -577,12 +586,14 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                               decoration: BoxDecoration(
                                 color: isSelected
-                                    ? AppColors.brandingOrange.withValues(alpha: 0.22)
-                                    : Colors.white.withValues(alpha: 0.05),
+                                    ? const Color(0xFF2C2A28)
+                                    : const Color(0xFF232323),
                                 borderRadius: BorderRadius.circular(12),
                                 border: Border.all(
-                                  color: isSelected ? AppColors.brandingOrange : Colors.white12,
-                                  width: isSelected ? 1.8 : 1.0,
+                                  color: isSelected
+                                      ? const Color(0xFFFFE7D0).withValues(alpha: 0.65)
+                                      : const Color(0xFF333333),
+                                  width: isSelected ? 1.3 : 1.0,
                                 ),
                               ),
                               child: Row(
@@ -590,15 +601,15 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                                   Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                     decoration: BoxDecoration(
-                                      color: isSelected ? AppColors.brandingOrange : Colors.black45,
+                                      color: isSelected ? const Color(0xFF48423C) : const Color(0xFF323232),
                                       borderRadius: BorderRadius.circular(6),
                                     ),
                                     child: Text(
                                       code,
-                                      style: TextStyle(
+                                      style: const TextStyle(
                                         fontSize: 13,
                                         fontWeight: FontWeight.bold,
-                                        color: isSelected ? Colors.white : Colors.amber,
+                                        color: Color(0xFFFFE7D0),
                                       ),
                                     ),
                                   ),
@@ -620,14 +631,14 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                                           vehicle.isNotEmpty ? vehicle : 'Pasażerów: $stopsCount',
                                           style: TextStyle(
                                             fontSize: 11.5,
-                                            color: isSelected ? Colors.white70 : Colors.white54,
+                                            color: isSelected ? const Color(0xFFFFE7D0) : Colors.white60,
                                           ),
                                         ),
                                       ],
                                     ),
                                   ),
                                   if (isSelected)
-                                    const Icon(Icons.check_circle, color: AppColors.brandingOrange, size: 22)
+                                    const Icon(Icons.check_circle, color: Color(0xFFFFE7D0), size: 20)
                                   else
                                     Text(
                                       '$stopsCount os.',
@@ -645,12 +656,17 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                       width: double.infinity,
                       child: FilledButton(
                         style: FilledButton.styleFrom(
-                          backgroundColor: AppColors.brandingOrange,
-                          foregroundColor: Colors.white,
+                          backgroundColor: const Color(0xFF36322E),
+                          foregroundColor: const Color(0xFFFFE7D0),
+                          side: const BorderSide(
+                            color: Color(0xFF554D44),
+                            width: 1.0,
+                          ),
                           padding: const EdgeInsets.symmetric(vertical: 13),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
                           ),
+                          elevation: 0,
                         ),
                         onPressed: () async {
                           Navigator.pop(dialogCtx);
@@ -669,6 +685,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                             fontSize: 15,
                             fontWeight: FontWeight.bold,
                             letterSpacing: 0.3,
+                            color: Color(0xFFFFE7D0),
                           ),
                         ),
                       ),
@@ -689,6 +706,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
       backgroundColor: _cardBg,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        side: BorderSide(color: Color(0xFF383838), width: 1.0),
       ),
       builder: (ctx) => SafeArea(
         child: Padding(
@@ -708,8 +726,8 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
               const SizedBox(height: 12),
               ListTile(
                 leading: const CircleAvatar(
-                  backgroundColor: AppColors.brandingOrange,
-                  child: Icon(Icons.file_upload, color: Colors.white, size: 20),
+                  backgroundColor: Color(0xFF36322E),
+                  child: Icon(Icons.file_upload, color: Color(0xFFFFE7D0), size: 20),
                 ),
                 title: Text('Wybierz plik Excel z urządzenia', style: TextStyle(color: _textPrimary)),
                 subtitle: Text('Wybierz dowolny plik .xlsx z pamięci telefonu / dysku', style: TextStyle(color: _textSecondary)),
@@ -882,101 +900,83 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      // Górna sekcja: Logo BalticBus, tytuł i opis
-                      Column(
-                        children: [
-                          const SizedBox(height: 8),
-                          // Logo BalticBus (5-krotne kliknięcie odblokowuje/ukrywa opcje testowe)
-                          GestureDetector(
-                            key: const ValueKey('balticbus_logo_detector'),
-                            behavior: HitTestBehavior.opaque,
-                            onTap: () {
-                              _logoTapCounter++;
-                              if (_logoTapCounter >= 5) {
-                                _logoTapCounter = 0;
-                                setState(() {
-                                  _showDevOptions = !_showDevOptions;
-                                });
-                                _showNotice(
-                                  _showDevOptions
-                                      ? 'Odblokowano opcje testowe (Assets)'
-                                      : 'Ukryto opcje testowe',
-                                  _showDevOptions ? Icons.lock_open_rounded : Icons.lock_outline_rounded,
-                                  const Color(0xFFCBD5E1),
-                                );
-                              }
-                            },
-                            child: Container(
-                              width: 330,
-                              height: 115,
-                              alignment: Alignment.center,
-                              padding: const EdgeInsets.only(bottom: 6),
-                              child: Image.asset(
-                                'assets/images/balticbus_logo.png',
-                                height: 105,
-                                fit: BoxFit.contain,
-                                errorBuilder: (context, error, stackTrace) => Container(
-                                  width: 105,
-                                  height: 105,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    gradient: LinearGradient(
-                                      colors: [
-                                        AppColors.brandingOrange.withValues(alpha: 0.35),
-                                        activeTheme.boxStart,
-                                      ],
-                                      begin: Alignment.topLeft,
-                                      end: Alignment.bottomRight,
-                                    ),
-                                    border: Border.all(
-                                      color: AppColors.brandingOrange.withValues(alpha: 0.65),
-                                      width: 2,
-                                    ),
-                                  ),
-                                  child: const Icon(
-                                    Icons.directions_bus,
-                                    color: Colors.white,
-                                    size: 52,
-                                  ),
+                      // Górna sekcja: Logo BalticBus (podniesione o ~2 cm wyżej)
+                      Padding(
+                        padding: EdgeInsets.only(
+                          top: ((constraints.maxHeight - 32) * 0.09).clamp(24.0, 100.0),
+                        ),
+                        child: GestureDetector(
+                          key: const ValueKey('balticbus_logo_detector'),
+                          behavior: HitTestBehavior.opaque,
+                        onTap: () {
+                          _logoTapCounter++;
+                          if (_logoTapCounter >= 5) {
+                            _logoTapCounter = 0;
+                            setState(() {
+                              _showDevOptions = !_showDevOptions;
+                            });
+                            _showNotice(
+                              _showDevOptions
+                                  ? 'Odblokowano opcje testowe (Assets)'
+                                  : 'Ukryto opcje testowe',
+                              _showDevOptions ? Icons.lock_open_rounded : Icons.lock_outline_rounded,
+                              const Color(0xFFCBD5E1),
+                            );
+                          }
+                        },
+                        child: Container(
+                          width: double.infinity,
+                          constraints: const BoxConstraints(maxWidth: 380),
+                          height: 140,
+                          alignment: Alignment.center,
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          child: Image.asset(
+                            'assets/images/balticbus_logo.png',
+                            fit: BoxFit.contain,
+                            errorBuilder: (context, error, stackTrace) => Container(
+                              width: 120,
+                              height: 120,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                gradient: LinearGradient(
+                                  colors: [
+                                    AppColors.brandingOrange.withValues(alpha: 0.35),
+                                    activeTheme.boxStart,
+                                  ],
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
                                 ),
+                                border: Border.all(
+                                  color: AppColors.brandingOrange.withValues(alpha: 0.65),
+                                  width: 2,
+                                ),
+                              ),
+                              child: const Icon(
+                                Icons.directions_bus,
+                                color: Colors.white,
+                                size: 60,
                               ),
                             ),
                           ),
-                          const SizedBox(height: 12),
-                          const Text(
-                            'Brak aktywnego kursu',
-                            style: TextStyle(
-                              fontSize: 22,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                              letterSpacing: 0.3,
-                            ),
-                            textAlign: TextAlign.center,
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Poprzedni kurs został rozliczony, a baza danych wyczyszczona.\nWczytaj rozkład jazdy (.xlsx) na kolejny weekend.',
-                            style: TextStyle(
-                              fontSize: 13.5,
-                              color: _textSecondary,
-                              height: 1.4,
-                            ),
-                            textAlign: TextAlign.center,
-                          ),
-                        ],
+                        ),
+                      ),
                       ),
                       // Dolna sekcja: Pastylka "Rozpocznij przejazd" prowadząca do arkusza importu/zarządzania rozkładem
                       Padding(
                         padding: const EdgeInsets.only(top: 28, bottom: 20),
                         child: FilledButton(
                           style: FilledButton.styleFrom(
-                            backgroundColor: AppColors.brandingOrange,
-                            foregroundColor: Colors.white,
+                            backgroundColor: const Color(0xFF36322E),
+                            foregroundColor: const Color(0xFFFFE7D0),
+                            side: const BorderSide(
+                              color: Color(0xFF554D44),
+                              width: 1.2,
+                            ),
                             padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(30),
                             ),
-                            elevation: 4,
+                            elevation: 2,
                           ),
                           onPressed: _showImportOptions,
                           child: const Text(
@@ -985,6 +985,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                               fontSize: 16,
                               fontWeight: FontWeight.bold,
                               letterSpacing: 0.5,
+                              color: Color(0xFFFFE7D0),
                             ),
                           ),
                         ),
@@ -1392,27 +1393,6 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
         if (_allRoutes.isEmpty) {
           return Scaffold(
             backgroundColor: Colors.black,
-            extendBody: true,
-            extendBodyBehindAppBar: true,
-            appBar: AppBar(
-              backgroundColor: Colors.transparent,
-              elevation: 0,
-              scrolledUnderElevation: 0,
-              actions: [
-                Container(
-                  margin: const EdgeInsets.only(right: 8),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.22),
-                    shape: BoxShape.circle,
-                  ),
-                  child: IconButton(
-                    icon: const Icon(Icons.palette_outlined, color: Colors.white, size: 20),
-                    tooltip: 'Zmień motyw',
-                    onPressed: _showThemeSelectorSheet,
-                  ),
-                ),
-              ],
-            ),
             body: _isLoading
                 ? const Center(
                     child: CircularProgressIndicator(color: AppColors.brandingOrange),
@@ -1787,8 +1767,10 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
     return Container(
       decoration: _convexDecoration(
         borderRadius: BorderRadius.circular(16),
-        borderColor: AppColors.brandingOrange.withValues(alpha: 0.90),
-        borderWidth: 1.8,
+        borderColor: _isDark
+            ? const Color(0xFFFFE7D0).withValues(alpha: 0.60)
+            : AppColors.brandingOrange.withValues(alpha: 0.85),
+        borderWidth: 1.3,
         isHighlighted: true,
       ),
       padding: const EdgeInsets.all(14),
@@ -1935,21 +1917,29 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                         decoration: BoxDecoration(
-                          color: Colors.amber.withValues(alpha: 0.18),
+                          color: _isDark ? const Color(0xFF2C2A28) : Colors.amber.withValues(alpha: 0.18),
                           borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.amber.withValues(alpha: 0.45)),
+                          border: Border.all(
+                            color: _isDark
+                                ? const Color(0xFFFFE7D0).withValues(alpha: 0.40)
+                                : Colors.amber.withValues(alpha: 0.45),
+                          ),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Icon(Icons.access_time_filled, size: 13, color: Colors.amber),
+                            Icon(
+                              Icons.access_time_filled,
+                              size: 13,
+                              color: _isDark ? const Color(0xFFFFE7D0) : Colors.amber,
+                            ),
                             const SizedBox(width: 5),
                             Text(
                               currentTarget.hotelTime ?? '--:--',
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 15,
                                 fontWeight: FontWeight.bold,
-                                color: Colors.amber,
+                                color: _isDark ? const Color(0xFFFFE7D0) : Colors.amber,
                               ),
                             ),
                           ],
@@ -2115,21 +2105,29 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                         decoration: BoxDecoration(
-                          color: AppColors.brandingOrange.withValues(alpha: 0.18),
+                          color: _isDark ? const Color(0xFF2C2A28) : AppColors.brandingOrange.withValues(alpha: 0.18),
                           borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: AppColors.brandingOrange.withValues(alpha: 0.45)),
+                          border: Border.all(
+                            color: _isDark
+                                ? const Color(0xFFFFE7D0).withValues(alpha: 0.40)
+                                : AppColors.brandingOrange.withValues(alpha: 0.45),
+                          ),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Icon(Icons.access_time_filled, size: 13, color: AppColors.brandingOrange),
+                            Icon(
+                              Icons.access_time_filled,
+                              size: 13,
+                              color: _isDark ? const Color(0xFFFFE7D0) : AppColors.brandingOrange,
+                            ),
                             const SizedBox(width: 5),
                             Text(
                               currentTarget.homeTime ?? '--:--',
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 15,
                                 fontWeight: FontWeight.bold,
-                                color: AppColors.brandingOrange,
+                                color: _isDark ? const Color(0xFFFFE7D0) : AppColors.brandingOrange,
                               ),
                             ),
                           ],
@@ -2400,10 +2398,14 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
                         decoration: BoxDecoration(
-                          color: isAdBlue ? Colors.blue.shade50 : AppColors.brandingOrange.withValues(alpha: 0.1),
+                          color: isAdBlue
+                              ? (_isDark ? const Color(0xFF1B3A4B) : Colors.blue.shade50)
+                              : (_isDark ? const Color(0xFF2C2A28) : AppColors.brandingOrange.withValues(alpha: 0.1)),
                           borderRadius: BorderRadius.circular(4),
                           border: Border.all(
-                            color: isAdBlue ? Colors.blue.shade200 : AppColors.brandingOrange.withValues(alpha: 0.3),
+                            color: isAdBlue
+                                ? (_isDark ? const Color(0xFF3A6073) : Colors.blue.shade200)
+                                : (_isDark ? const Color(0xFF554D44) : AppColors.brandingOrange.withValues(alpha: 0.3)),
                           ),
                         ),
                         child: Text(
@@ -2411,7 +2413,9 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                           style: TextStyle(
                             fontSize: 10,
                             fontWeight: FontWeight.w600,
-                            color: isAdBlue ? Colors.blue.shade900 : AppColors.brandingOrange,
+                            color: isAdBlue
+                                ? (_isDark ? const Color(0xFF90CAF9) : Colors.blue.shade900)
+                                : (_isDark ? const Color(0xFFFFE7D0) : AppColors.brandingOrange),
                           ),
                         ),
                       ),
@@ -2596,11 +2600,17 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                   OutlinedButton.icon(
                     style: OutlinedButton.styleFrom(
                       foregroundColor: Colors.white,
-                      side: const BorderSide(color: AppColors.brandingOrange),
+                      side: BorderSide(
+                        color: _isDark ? const Color(0xFF554D44) : AppColors.brandingOrange,
+                      ),
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                       visualDensity: VisualDensity.compact,
                     ),
-                    icon: const Icon(Icons.edit, size: 14, color: AppColors.brandingOrange),
+                    icon: Icon(
+                      Icons.edit,
+                      size: 14,
+                      color: _isDark ? const Color(0xFFFFE7D0) : AppColors.brandingOrange,
+                    ),
                     label: const Text('Edytuj', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
                     onPressed: () => _showEditFinancialsDialog(() => setState(() {})),
                   ),
@@ -3026,10 +3036,10 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: _convexDecoration(
-        baseTopColor: _isDark ? const Color(0xFF3D2C14) : Colors.amber.shade100,
-        baseBottomColor: _isDark ? const Color(0xFF261A0A) : Colors.amber.shade50,
-        borderColor: Colors.amber.shade600,
-        borderWidth: 1.8,
+        baseTopColor: _isDark ? const Color(0xFF2C241E) : Colors.amber.shade100,
+        baseBottomColor: _isDark ? const Color(0xFF1E1814) : Colors.amber.shade50,
+        borderColor: _isDark ? const Color(0xFF6E563E) : Colors.amber.shade600,
+        borderWidth: 1.2,
         isHighlighted: true,
       ),
       child: Row(
@@ -3037,10 +3047,14 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: _isDark ? const Color(0xFF422E15) : Colors.amber.shade200,
+              color: _isDark ? const Color(0xFF382E26) : Colors.amber.shade200,
               shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.coffee, color: Colors.amber, size: 22),
+            child: Icon(
+              Icons.coffee,
+              color: _isDark ? const Color(0xFFFFE7D0) : Colors.amber,
+              size: 22,
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -3052,7 +3066,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
                     fontSize: 12,
-                    color: _isDark ? Colors.amber.shade300 : Colors.brown,
+                    color: _isDark ? const Color(0xFFFFE7D0) : Colors.brown,
                     letterSpacing: 0.3,
                   ),
                 ),
@@ -3164,7 +3178,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
             border: Border.all(
               color: isBreakActive
                   ? Colors.redAccent.withValues(alpha: 0.95)
-                  : Colors.amber.withValues(alpha: 0.60),
+                  : (_isDark ? const Color(0xFF554D44) : Colors.amber.withValues(alpha: 0.60)),
               width: isBreakActive ? 1.6 : 1.1,
             ),
             boxShadow: isBreakActive
@@ -3183,7 +3197,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
               Icon(
                 isBreakActive ? Icons.timer : Icons.coffee,
                 size: 16,
-                color: isBreakActive ? Colors.white : Colors.amber,
+                color: isBreakActive ? Colors.white : (_isDark ? const Color(0xFFFFE7D0) : Colors.amber),
               ),
               const SizedBox(width: 6),
               Text(
@@ -3191,7 +3205,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.bold,
-                  color: isBreakActive ? Colors.white : Colors.amber.shade200,
+                  color: isBreakActive ? Colors.white : (_isDark ? const Color(0xFFFFE7D0) : Colors.amber.shade200),
                   letterSpacing: 0.3,
                 ),
               ),
@@ -3208,75 +3222,95 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
     required bool isSelected,
     required VoidCallback onTap,
   }) {
-    final theme = AppColors.activeTheme;
-
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(22),
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
+          duration: const Duration(milliseconds: 140),
           height: 40,
           padding: const EdgeInsets.symmetric(horizontal: 10),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(22),
             gradient: isSelected
-                ? LinearGradient(
-                    colors: [theme.primaryAccent, theme.secondaryAccent],
-                    begin: Alignment.centerLeft,
-                    end: Alignment.centerRight,
-                  )
-                : LinearGradient(
+                ? const LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
                     colors: [
-                      theme.boxStart.withValues(alpha: 0.90),
-                      theme.boxEnd.withValues(alpha: 0.75),
+                      Color(0xFF0D0D0D),
+                      Color(0xFF141414),
+                      Color(0xFF1C1C1C),
                     ],
-                    begin: Alignment.centerLeft,
-                    end: Alignment.centerRight,
+                    stops: [0.0, 0.45, 1.0],
+                  )
+                : const LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Color(0xFF2C2A28),
+                      Color(0xFF232220),
+                      Color(0xFF1E1D1B),
+                    ],
+                    stops: [0.0, 0.50, 1.0],
                   ),
             border: Border.all(
               color: isSelected
-                  ? Colors.white.withValues(alpha: 0.90)
-                  : theme.border.withValues(alpha: 0.50),
-              width: isSelected ? 1.4 : 1.1,
+                  ? const Color(0xFF2B2B2B)
+                  : const Color(0xFF3E3B37),
+              width: 1.1,
             ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.40),
-                blurRadius: 8,
-                offset: const Offset(0, 3),
-              ),
-              if (isSelected)
-                BoxShadow(
-                  color: theme.primaryAccent.withValues(alpha: 0.45),
-                  blurRadius: 10,
-                  offset: const Offset(0, 2),
-                ),
-            ],
+            boxShadow: isSelected
+                ? [
+                    // Efekt wklęsłości / wciśnięcia: głęboki cień u góry wewnątrz
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.75),
+                      blurRadius: 3,
+                      offset: const Offset(0, 2),
+                    ),
+                  ]
+                : [
+                    // Efekt wypukłości (przycisk niewciśnięty rzuca cień zewnętrzny)
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.55),
+                      blurRadius: 6,
+                      offset: const Offset(0, 3),
+                    ),
+                    BoxShadow(
+                      color: Colors.white.withValues(alpha: 0.05),
+                      blurRadius: 1,
+                      offset: const Offset(0, -1),
+                    ),
+                  ],
           ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                icon,
-                size: 16,
-                color: isSelected ? Colors.white : theme.secondaryAccent,
-              ),
-              const SizedBox(width: 6),
-              Flexible(
-                child: Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
-                    color: isSelected ? Colors.white : Colors.white.withValues(alpha: 0.90),
-                    letterSpacing: 0.2,
-                  ),
-                  overflow: TextOverflow.ellipsis,
+          child: AnimatedPadding(
+            duration: const Duration(milliseconds: 140),
+            padding: EdgeInsets.only(top: isSelected ? 2.0 : 0.0),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  icon,
+                  size: 15,
+                  color: isSelected ? const Color(0xFFFFE7D0) : Colors.white60,
                 ),
-              ),
-            ],
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                      color: isSelected
+                          ? const Color(0xFFFFE7D0)
+                          : Colors.white70,
+                      letterSpacing: 0.2,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -3323,12 +3357,12 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
                     color: isPLtoDE
-                        ? AppColors.brandingOrange.withValues(alpha: 0.15)
+                        ? (_isDark ? const Color(0xFF2C2A28) : AppColors.brandingOrange.withValues(alpha: 0.15))
                         : (_isDark ? const Color(0xFF093F52).withValues(alpha: 0.35) : Colors.blue.shade50),
                     borderRadius: BorderRadius.circular(6),
                     border: Border.all(
                       color: isPLtoDE
-                          ? AppColors.brandingOrange.withValues(alpha: 0.4)
+                          ? (_isDark ? const Color(0xFF554D44) : AppColors.brandingOrange.withValues(alpha: 0.4))
                           : (_isDark ? const Color(0xFF65A7C2).withValues(alpha: 0.45) : Colors.blue.shade300),
                     ),
                   ),
@@ -3338,7 +3372,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                       fontSize: 11,
                       fontWeight: FontWeight.bold,
                       color: isPLtoDE
-                          ? AppColors.brandingOrange
+                          ? (_isDark ? const Color(0xFFFFE7D0) : AppColors.brandingOrange)
                           : (_isDark ? const Color(0xFFC7E5F2) : const Color(0xFF093F52)),
                     ),
                   ),
@@ -3405,14 +3439,20 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                 child: OutlinedButton.icon(
                   style: OutlinedButton.styleFrom(
                     foregroundColor: _isDark ? Colors.white : AppColors.primary,
-                    side: const BorderSide(color: AppColors.brandingOrange),
+                    side: BorderSide(
+                      color: _isDark ? const Color(0xFF554D44) : AppColors.brandingOrange,
+                    ),
                     padding: const EdgeInsets.symmetric(vertical: 8),
                   ),
                   onPressed: () => LauncherService.openFullRoute(
                     context,
                     route.googleMapsUrl!,
                   ),
-                  icon: const Icon(Icons.map, size: 18, color: AppColors.brandingOrange),
+                  icon: Icon(
+                    Icons.map,
+                    size: 18,
+                    color: _isDark ? const Color(0xFFFFE7D0) : AppColors.brandingOrange,
+                  ),
                   label: const Text(
                     'Otwórz zaplanowaną trasę w Google Maps',
                     style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
@@ -3675,7 +3715,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
         statusIcon = Icons.block;
         break;
       case PickupStatus.pending:
-        statusColor = AppColors.brandingOrange;
+        statusColor = _isDark ? const Color(0xFFFFE7D0) : AppColors.brandingOrange;
         statusText = 'Oczekuje';
         statusIcon = Icons.schedule;
         break;
@@ -3691,9 +3731,9 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
           borderRadius: BorderRadius.circular(12),
           borderColor: isDelivered
               ? (_isDark ? Colors.white.withValues(alpha: 0.12) : Colors.grey.shade400)
-              : statusColor.withValues(alpha: 0.70),
-          borderWidth: isDelivered ? 1.0 : 1.4,
-          isHighlighted: !isDelivered && stop.status == PickupStatus.pending,
+              : (_isDark ? const Color(0xFF554D44) : statusColor.withValues(alpha: 0.70)),
+          borderWidth: 1.0,
+          isHighlighted: false,
           baseStartColor: isDelivered
               ? (_isDark ? const Color(0xFF141414) : Colors.grey.shade200)
               : null,
@@ -3846,9 +3886,9 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
           borderRadius: BorderRadius.circular(14),
           borderColor: isDelivered
               ? (_isDark ? Colors.white.withValues(alpha: 0.14) : Colors.grey.shade400)
-              : statusColor.withValues(alpha: 0.75),
-          borderWidth: isDelivered ? 1.0 : 1.6,
-          isHighlighted: !isDelivered && stop.status == PickupStatus.pending,
+              : (_isDark ? const Color(0xFF554D44) : statusColor.withValues(alpha: 0.75)),
+          borderWidth: isDelivered ? 1.0 : 1.2,
+          isHighlighted: false,
           baseStartColor: isDelivered
               ? (_isDark ? const Color(0xFF141414) : Colors.grey.shade200)
               : null,
@@ -4794,9 +4834,15 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
               OutlinedButton.icon(
                 style: OutlinedButton.styleFrom(
                   foregroundColor: _isDark ? Colors.white : AppColors.primary,
-                  side: const BorderSide(color: AppColors.brandingOrange),
+                  side: BorderSide(
+                    color: _isDark ? const Color(0xFF554D44) : AppColors.brandingOrange,
+                  ),
                 ),
-                icon: const Icon(Icons.description, size: 16, color: AppColors.brandingOrange),
+                icon: Icon(
+                  Icons.description,
+                  size: 16,
+                  color: _isDark ? const Color(0xFFFFE7D0) : AppColors.brandingOrange,
+                ),
                 label: const Text('Zapisz Word (.docx)'),
                 onPressed: () {
                   DocxReportService.savePlanJazdyDocxToDesktop(context, summary);
