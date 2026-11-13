@@ -69,41 +69,35 @@ class DocxReportService {
   static List<int> generatePlanJazdyDocxBytes(WeekendTripSummary summary) {
     final archive = Archive();
 
+    void addXml(String path, String content) {
+      final bytes = utf8.encode(content);
+      archive.addFile(ArchiveFile(path, bytes.length, bytes));
+    }
+
     // 1. [Content_Types].xml
-    archive.addFile(ArchiveFile(
-      '[Content_Types].xml',
-      _contentTypesXml.length,
-      utf8.encode(_contentTypesXml),
-    ));
+    addXml('[Content_Types].xml', _contentTypesXml);
 
     // 2. _rels/.rels
-    archive.addFile(ArchiveFile(
-      '_rels/.rels',
-      _rootRelsXml.length,
-      utf8.encode(_rootRelsXml),
-    ));
+    addXml('_rels/.rels', _rootRelsXml);
 
     // 3. word/_rels/document.xml.rels
-    archive.addFile(ArchiveFile(
-      'word/_rels/document.xml.rels',
-      _documentRelsXml.length,
-      utf8.encode(_documentRelsXml),
-    ));
+    addXml('word/_rels/document.xml.rels', _documentRelsXml);
 
     // 4. word/styles.xml
-    archive.addFile(ArchiveFile(
-      'word/styles.xml',
-      _stylesXml.length,
-      utf8.encode(_stylesXml),
-    ));
+    addXml('word/styles.xml', _stylesXml);
 
-    // 5. word/document.xml
+    // 5. word/settings.xml
+    addXml('word/settings.xml', _settingsXml);
+
+    // 6. word/webSettings.xml
+    addXml('word/webSettings.xml', _webSettingsXml);
+
+    // 7. word/fontTable.xml
+    addXml('word/fontTable.xml', _fontTableXml);
+
+    // 8. word/document.xml
     final documentXml = _buildDocumentXml(summary);
-    archive.addFile(ArchiveFile(
-      'word/document.xml',
-      utf8.encode(documentXml).length,
-      utf8.encode(documentXml),
-    ));
+    addXml('word/document.xml', documentXml);
 
     return ZipEncoder().encode(archive)!;
   }
@@ -135,7 +129,7 @@ class DocxReportService {
     buffer.write('<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">');
     buffer.write('<w:body>');
 
-    // --- NAGŁÓWEK: BB.08 (lewa strona) oraz PLAN JAZDY (wyśrodkowany, bold) ---
+    // --- 1. NAGŁÓWEK: BB.08 (lewa strona) oraz PLAN JAZDY (wyśrodkowany, bold) ---
     buffer.write('''
     <w:tbl>
       <w:tblPr>
@@ -149,6 +143,10 @@ class DocxReportService {
           <w:insideV w:val="none"/>
         </w:tblBorders>
       </w:tblPr>
+      <w:tblGrid>
+        <w:gridCol w:w="2500"/>
+        <w:gridCol w:w="7900"/>
+      </w:tblGrid>
       <w:tr>
         <w:tc>
           <w:tcPr><w:tcW w:w="2500" w:type="dxa"/></w:tcPr>
@@ -170,7 +168,7 @@ class DocxReportService {
     // Odstęp
     buffer.write('<w:p><w:pPr><w:spacing w:after="80"/></w:pPr></w:p>');
 
-    // --- TABELA: DATA, KIEROWCA, BUS / NR REJ. ---
+    // --- 2. TABELA: DATA, KIEROWCA, BUS / NR REJ. ---
     buffer.write('''
     <w:tbl>
       <w:tblPr>
@@ -184,6 +182,10 @@ class DocxReportService {
           <w:insideV w:val="none"/>
         </w:tblBorders>
       </w:tblPr>
+      <w:tblGrid>
+        <w:gridCol w:w="2200"/>
+        <w:gridCol w:w="8200"/>
+      </w:tblGrid>
 
       <!-- Wiersz DATA -->
       <w:tr>
@@ -251,7 +253,7 @@ class DocxReportService {
     // Odstęp
     buffer.write('<w:p><w:pPr><w:spacing w:after="80"/></w:pPr></w:p>');
 
-    // --- TABELA: STAN LICZNIKA (start | koniec | suma) ---
+    // --- 3. TABELA: STAN LICZNIKA (start | koniec | suma) ---
     buffer.write('''
     <w:tbl>
       <w:tblPr>
@@ -265,6 +267,12 @@ class DocxReportService {
           <w:insideV w:val="single" w:sz="6" w:space="0" w:color="000000"/>
         </w:tblBorders>
       </w:tblPr>
+      <w:tblGrid>
+        <w:gridCol w:w="2200"/>
+        <w:gridCol w:w="2700"/>
+        <w:gridCol w:w="2800"/>
+        <w:gridCol w:w="2700"/>
+      </w:tblGrid>
 
       <!-- Nagłówki licznika -->
       <w:tr>
@@ -311,7 +319,7 @@ class DocxReportService {
     // Odstęp
     buffer.write('<w:p><w:pPr><w:spacing w:after="80"/></w:pPr></w:p>');
 
-    // --- SEKCJA ZALICZKA ---
+    // --- 4. SEKCJA ZALICZKA ---
     final advEurStr = summary.advanceEur > 0 ? '${summary.advanceEur.toStringAsFixed(0)} €' : '0,00 €';
     final advPlnStr = summary.advancePln > 0 ? '${summary.advancePln.toStringAsFixed(2)} zł' : '0,00 zł';
     buffer.write('''
@@ -327,7 +335,7 @@ class DocxReportService {
     </w:p>
     ''');
 
-    // --- RAMKA: WYDATKI ZŁ ---
+    // --- 5. RAMKA: WYDATKI ZŁ ---
     buffer.write('''
     <w:tbl>
       <w:tblPr>
@@ -339,6 +347,9 @@ class DocxReportService {
           <w:right w:val="single" w:sz="8" w:space="0" w:color="000000"/>
         </w:tblBorders>
       </w:tblPr>
+      <w:tblGrid>
+        <w:gridCol w:w="10400"/>
+      </w:tblGrid>
       <w:tr>
         <w:tc>
           <w:tcPr><w:tcW w:w="10400" w:type="dxa"/></w:tcPr>
@@ -363,7 +374,7 @@ class DocxReportService {
     // Odstęp
     buffer.write('<w:p><w:pPr><w:spacing w:after="80"/></w:pPr></w:p>');
 
-    // --- RAMKA: WYDATKI EURO ---
+    // --- 6. RAMKA: WYDATKI EURO ---
     buffer.write('''
     <w:tbl>
       <w:tblPr>
@@ -375,6 +386,9 @@ class DocxReportService {
           <w:right w:val="single" w:sz="8" w:space="0" w:color="000000"/>
         </w:tblBorders>
       </w:tblPr>
+      <w:tblGrid>
+        <w:gridCol w:w="10400"/>
+      </w:tblGrid>
       <w:tr>
         <w:tc>
           <w:tcPr><w:tcW w:w="10400" w:type="dxa"/></w:tcPr>
@@ -399,7 +413,7 @@ class DocxReportService {
     // Odstęp
     buffer.write('<w:p><w:pPr><w:spacing w:after="80"/></w:pPr></w:p>');
 
-    // --- RAMKA: ODEBRANE OD GOŚCI ---
+    // --- 7. RAMKA: ODEBRANE OD GOŚCI ---
     final guestPln = summary.cashCollectedPln > 0 ? '${summary.cashCollectedPln.toStringAsFixed(2)} zł' : '';
     final guestEur = summary.cashCollectedEur > 0 ? '${summary.cashCollectedEur.toStringAsFixed(2)} €' : '';
     final guestText = [guestEur, guestPln].where((s) => s.isNotEmpty).join(' / ');
@@ -414,6 +428,9 @@ class DocxReportService {
           <w:right w:val="single" w:sz="8" w:space="0" w:color="000000"/>
         </w:tblBorders>
       </w:tblPr>
+      <w:tblGrid>
+        <w:gridCol w:w="10400"/>
+      </w:tblGrid>
       <w:tr>
         <w:tc>
           <w:tcPr><w:tcW w:w="10400" w:type="dxa"/></w:tcPr>
@@ -433,7 +450,7 @@ class DocxReportService {
     // Odstęp
     buffer.write('<w:p><w:pPr><w:spacing w:after="80"/></w:pPr></w:p>');
 
-    // --- DOLNY WIERSZ: ŚR. SPALANIE, PODPIS oraz TABELA PRZERWY (SOBOTA / NIEDZIELA) ---
+    // --- 8. DOLNY WIERSZ: ŚR. SPALANIE, PODPIS oraz TABELA PRZERWY (SOBOTA / NIEDZIELA) ---
     final consStr = consumption != null
         ? consumption.toStringAsFixed(1).replaceAll('.', ',')
         : '';
@@ -451,6 +468,10 @@ class DocxReportService {
           <w:insideV w:val="none"/>
         </w:tblBorders>
       </w:tblPr>
+      <w:tblGrid>
+        <w:gridCol w:w="2980"/>
+        <w:gridCol w:w="7420"/>
+      </w:tblGrid>
       <w:tr>
         <!-- Kolumna lewa: ŚR. SPALANIE i PODPIS -->
         <w:tc>
@@ -467,6 +488,9 @@ class DocxReportService {
                 <w:right w:val="single" w:sz="8" w:space="0" w:color="000000"/>
               </w:tblBorders>
             </w:tblPr>
+            <w:tblGrid>
+              <w:gridCol w:w="2800"/>
+            </w:tblGrid>
             <w:tr>
               <w:tc>
                 <w:tcPr><w:tcW w:w="2800" w:type="dxa"/></w:tcPr>
@@ -492,6 +516,9 @@ class DocxReportService {
                 <w:right w:val="single" w:sz="8" w:space="0" w:color="000000"/>
               </w:tblBorders>
             </w:tblPr>
+            <w:tblGrid>
+              <w:gridCol w:w="2800"/>
+            </w:tblGrid>
             <w:tr>
               <w:tc>
                 <w:tcPr><w:tcW w:w="2800" w:type="dxa"/></w:tcPr>
@@ -500,6 +527,9 @@ class DocxReportService {
               </w:tc>
             </w:tr>
           </w:tbl>
+
+          <!-- Każda komórka tc w OpenXML musi kończyć się paragrafem w:p -->
+          <w:p><w:pPr><w:spacing w:after="0"/></w:pPr></w:p>
         </w:tc>
 
         <!-- Kolumna prawa: PRZERWY (SOBOTA / NIEDZIELA) bez słów 'Od' i 'Do' -->
@@ -517,6 +547,11 @@ class DocxReportService {
                 <w:insideV w:val="none"/>
               </w:tblBorders>
             </w:tblPr>
+            <w:tblGrid>
+              <w:gridCol w:w="1200"/>
+              <w:gridCol w:w="3100"/>
+              <w:gridCol w:w="3100"/>
+            </w:tblGrid>
 
             <!-- Nagłówek PRZERWY -->
             <w:tr>
@@ -585,7 +620,17 @@ class DocxReportService {
       ''');
     }
 
-    buffer.write('</w:tbl></w:tc></w:tr></w:tbl>');
+    buffer.write('''
+          </w:tbl>
+          <!-- Każda komórka tc w OpenXML musi kończyć się paragrafem w:p -->
+          <w:p><w:pPr><w:spacing w:after="0"/></w:pPr></w:p>
+        </w:tc>
+      </w:tr>
+    </w:tbl>
+    ''');
+
+    // Przed w:sectPr musi znajdować się paragraf w:p
+    buffer.write('<w:p><w:pPr><w:spacing w:after="0"/></w:pPr></w:p>');
 
     // Rozmiar strony A4 i marginesy (pół cala = 720 dxa)
     buffer.write('''
@@ -605,6 +650,9 @@ class DocxReportService {
   <Default Extension="xml" ContentType="application/xml"/>
   <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
   <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
+  <Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/>
+  <Override PartName="/word/webSettings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.webSettings+xml"/>
+  <Override PartName="/word/fontTable.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.fontTable+xml"/>
 </Types>''';
 
   static const String _rootRelsXml = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -615,6 +663,9 @@ class DocxReportService {
   static const String _documentRelsXml = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings" Target="settings.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/webSettings" Target="webSettings.xml"/>
+  <Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable" Target="fontTable.xml"/>
 </Relationships>''';
 
   static const String _stylesXml = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -634,4 +685,28 @@ class DocxReportService {
     </w:pPrDefault>
   </w:docDefaults>
 </w:styles>''';
+
+  static const String _settingsXml = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:defaultTabStop w:val="708"/>
+  <w:hyphenationZone w:val="425"/>
+  <w:characterSpacingControl w:val="doNotCompress"/>
+  <w:compat>
+    <w:compatSetting w:name="compatibilityMode" w:uri="http://schemas.microsoft.com/office/word" w:val="15"/>
+  </w:compat>
+</w:settings>''';
+
+  static const String _webSettingsXml = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:webSettings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:optimizeForBrowser/>
+</w:webSettings>''';
+
+  static const String _fontTableXml = '''<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:fonts xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:font w:name="Arial">
+    <w:panose1 w:val="020B0604020202020204"/>
+    <w:family w:val="swiss"/>
+    <w:pitch w:val="variable"/>
+  </w:font>
+</w:fonts>''';
 }

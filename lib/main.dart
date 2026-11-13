@@ -1065,6 +1065,48 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
     StorageService.saveBreaks(route.id, route.breaks);
   }
 
+  void _handleBreakPillTap(BusRoute route) {
+    var active = route.activeBreak;
+    if (active == null) {
+      final b = DriverBreak(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        startTime: DateTime.now(),
+      );
+      setState(() {
+        route.breaks.add(b);
+      });
+      StorageService.saveBreaks(route.id, route.breaks);
+      _showNotice(
+        'Rozpoczęto przerwę o ${_formatTime(b.startTime)}',
+        Icons.coffee,
+      );
+      active = b;
+    }
+    _showDriverBreakDialog(active);
+  }
+
+  Future<void> _showDriverBreakDialog(DriverBreak activeBreak) async {
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogCtx) => DriverBreakDialog(
+        activeBreak: activeBreak,
+        busCode: _selectedBusCode,
+        onEndBreak: () {
+          setState(() {
+            activeBreak.endTime = DateTime.now();
+          });
+          StorageService.saveBreaks(_currentRoute.id, _currentRoute.breaks);
+          _showNotice(
+            'Zakończono przerwę (${activeBreak.durationMinutes} min, ${_formatTime(activeBreak.startTime)} - ${_formatTime(activeBreak.endTime!)})',
+            Icons.check_circle,
+          );
+        },
+      ),
+    );
+    if (mounted) setState(() {});
+  }
+
   void _editOdometer(bool isStart) {
     final startVal = _tripStartOdometer;
     final endVal = _tripEndOdometer;
@@ -1532,9 +1574,9 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
               label: 'Trasa',
             ),
             const BottomNavigationBarItem(
-              icon: Icon(Icons.directions_bus_outlined),
-              activeIcon: Icon(Icons.directions_bus),
-              label: 'Pojazd & Paliwo',
+              icon: Icon(Icons.local_gas_station_outlined),
+              activeIcon: Icon(Icons.local_gas_station),
+              label: 'Tankowanie',
             ),
             BottomNavigationBarItem(
               icon: Badge(
@@ -1610,12 +1652,6 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
         // Przełącznik Dnia (Sobota / Niedziela) + Pastylka Pauzy Kierowcy
         _buildDaySelector(route),
         const SizedBox(height: 12),
-
-        // Aktywna przerwa kierowcy (wyświetlana nad ważnymi poleceniami logistycznymi)
-        if (route.activeBreak != null) ...[
-          _buildActiveBreakBanner(route.activeBreak!),
-          const SizedBox(height: 12),
-        ],
 
         // Specjalne uwagi i polecenia logistyczne
         if (route.specialNotes.isNotEmpty) ...[
@@ -1981,7 +2017,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                             ),
                             const SizedBox(height: 2),
                             Text(
-                              currentTarget.address,
+                              currentTarget.displayAddress,
                               style: const TextStyle(
                                 fontSize: 14,
                                 fontWeight: FontWeight.w600,
@@ -2049,7 +2085,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                             const Icon(Icons.schedule, size: 14, color: Color(0xFF52B788)),
                             const SizedBox(width: 5),
                             Text(
-                              currentTarget.homeTime ?? '--:--',
+                              currentTarget.homeTimeDisplay,
                               style: const TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.bold,
@@ -2091,7 +2127,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                             ),
                             const SizedBox(height: 2),
                             Text(
-                              currentTarget.address,
+                              currentTarget.displayAddress,
                               style: const TextStyle(
                                 fontSize: 14,
                                 fontWeight: FontWeight.w600,
@@ -2123,7 +2159,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                             ),
                             const SizedBox(width: 5),
                             Text(
-                              currentTarget.homeTime ?? '--:--',
+                              currentTarget.homeTimeDisplay,
                               style: TextStyle(
                                 fontSize: 15,
                                 fontWeight: FontWeight.bold,
@@ -2243,15 +2279,11 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
     );
   }
 
-  // TAB 1: POJAZD & PALIWO
+  // TAB 1: TANKOWANIE
   Widget _buildVehicleAndFuelTab(BusRoute route, bool isPLtoDE) {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 36),
       children: [
-        // Karta pojazdu i kierowcy
-        _buildVehicleCard(route, isPLtoDE),
-        const SizedBox(height: 14),
-
         // Liczniki kilometrów (START / STOP / PRZEBIEG)
         _buildOdometerCard(route),
         const SizedBox(height: 14),
@@ -2485,7 +2517,9 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                   ),
                   FilledButton.icon(
                     style: FilledButton.styleFrom(
-                      backgroundColor: isBreakActive ? const Color(0xFFC10801) : AppColors.brandingOrange,
+                      backgroundColor: const Color(0xFF36322E),
+                      foregroundColor: const Color(0xFFFFE7D0),
+                      side: const BorderSide(color: Color(0xFF554D44), width: 1.0),
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                       visualDensity: VisualDensity.compact,
                     ),
@@ -2500,40 +2534,45 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
               ),
               const SizedBox(height: 10),
               if (isBreakActive) ...[
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF8B251B).withValues(alpha: 0.40),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: const Color(0xFFC84031)),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.coffee, color: Colors.white, size: 28),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              '☕ TRWA PRZERWA KIEROWCY',
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white,
-                                letterSpacing: 0.3,
+                InkWell(
+                  onTap: () => _showDriverBreakDialog(route.activeBreak!),
+                  borderRadius: BorderRadius.circular(10),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF2C2A28),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: const Color(0xFF554D44)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.coffee, color: Color(0xFFFFE7D0), size: 26),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                '☕ TRWA PRZERWA KIEROWCY',
+                                style: TextStyle(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFFFFE7D0),
+                                  letterSpacing: 0.3,
+                                ),
                               ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              'Rozpoczęto o ${_formatTime(route.activeBreak!.startTime)} (trwa ${DateTime.now().difference(route.activeBreak!.startTime).inMinutes} min)',
-                              style: const TextStyle(fontSize: 12, color: Colors.white70),
-                            ),
-                          ],
+                              const SizedBox(height: 2),
+                              Text(
+                                'Rozpoczęto o ${_formatTime(route.activeBreak!.startTime)} • Dotknij, aby otworzyć licznik',
+                                style: const TextStyle(fontSize: 11.5, color: Colors.white70),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                    ],
+                        const Icon(Icons.open_in_new, color: Color(0xFFFFE7D0), size: 18),
+                      ],
+                    ),
                   ),
                 ),
                 const SizedBox(height: 10),
@@ -3032,72 +3071,6 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
     );
   }
 
-  Widget _buildActiveBreakBanner(DriverBreak activeBreak) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: _convexDecoration(
-        baseTopColor: _isDark ? const Color(0xFF2C241E) : Colors.amber.shade100,
-        baseBottomColor: _isDark ? const Color(0xFF1E1814) : Colors.amber.shade50,
-        borderColor: _isDark ? const Color(0xFF6E563E) : Colors.amber.shade600,
-        borderWidth: 1.2,
-        isHighlighted: true,
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: _isDark ? const Color(0xFF382E26) : Colors.amber.shade200,
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              Icons.coffee,
-              color: _isDark ? const Color(0xFFFFE7D0) : Colors.amber,
-              size: 22,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '☕ TRWA PRZERWA KIEROWCY',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 12,
-                    color: _isDark ? const Color(0xFFFFE7D0) : Colors.brown,
-                    letterSpacing: 0.3,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  'Rozpoczęto: ${_formatTime(activeBreak.startTime)} (${activeBreak.durationMinutes} min temu)',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: _textPrimary,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          FilledButton.icon(
-            style: FilledButton.styleFrom(
-              backgroundColor: Colors.brown,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              visualDensity: VisualDensity.compact,
-            ),
-            icon: const Icon(Icons.stop, size: 16),
-            label: const Text('Zakończ', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-            onPressed: _toggleDriverBreak,
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildDaySelector(BusRoute route) {
     final dates = _availableDates;
     final isBreakActive = route.activeBreak != null;
@@ -3153,43 +3126,21 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        onTap: _toggleDriverBreak,
-        borderRadius: BorderRadius.circular(22),
+        onTap: () => _handleBreakPillTap(route),
+        borderRadius: BorderRadius.circular(12),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 180),
           height: 40,
           padding: const EdgeInsets.symmetric(horizontal: 12),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(22),
-            gradient: isBreakActive
-                ? const LinearGradient(
-                    colors: [Color(0xFFC10801), Color(0xFFE53935)],
-                    begin: Alignment.centerLeft,
-                    end: Alignment.centerRight,
-                  )
-                : LinearGradient(
-                    colors: [
-                      const Color(0xFF3E2723).withValues(alpha: 0.90),
-                      const Color(0xFF4E342E).withValues(alpha: 0.85),
-                    ],
-                    begin: Alignment.centerLeft,
-                    end: Alignment.centerRight,
-                  ),
+            color: isBreakActive ? const Color(0xFF2C2A28) : const Color(0xFF232323),
+            borderRadius: BorderRadius.circular(12),
             border: Border.all(
               color: isBreakActive
-                  ? Colors.redAccent.withValues(alpha: 0.95)
-                  : (_isDark ? const Color(0xFF554D44) : Colors.amber.withValues(alpha: 0.60)),
-              width: isBreakActive ? 1.6 : 1.1,
+                  ? const Color(0xFFFFE7D0).withValues(alpha: 0.85)
+                  : const Color(0xFF383838),
+              width: 1.0,
             ),
-            boxShadow: isBreakActive
-                ? [
-                    BoxShadow(
-                      color: Colors.red.withValues(alpha: 0.45),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2),
-                    ),
-                  ]
-                : null,
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -3197,15 +3148,15 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
               Icon(
                 isBreakActive ? Icons.timer : Icons.coffee,
                 size: 16,
-                color: isBreakActive ? Colors.white : (_isDark ? const Color(0xFFFFE7D0) : Colors.amber),
+                color: isBreakActive ? const Color(0xFFFFE7D0) : const Color(0xFFB0B0B0),
               ),
               const SizedBox(width: 6),
               Text(
-                isBreakActive ? 'Koniec pauzy' : 'Pauza',
+                isBreakActive ? 'Pauza w toku' : 'Pauza',
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.bold,
-                  color: isBreakActive ? Colors.white : (_isDark ? const Color(0xFFFFE7D0) : Colors.amber.shade200),
+                  color: isBreakActive ? const Color(0xFFFFE7D0) : const Color(0xFFD0D0D0),
                   letterSpacing: 0.3,
                 ),
               ),
@@ -3323,147 +3274,6 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
       return '${parts[2]}.${parts[1]}';
     }
     return date;
-  }
-
-  Widget _buildVehicleCard(BusRoute route, bool isPLtoDE) {
-    return Container(
-      decoration: _convexDecoration(
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: AppColors.primary,
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Text(
-                    route.code,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 13,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: isPLtoDE
-                        ? (_isDark ? const Color(0xFF2C2A28) : AppColors.brandingOrange.withValues(alpha: 0.15))
-                        : (_isDark ? const Color(0xFF093F52).withValues(alpha: 0.35) : Colors.blue.shade50),
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(
-                      color: isPLtoDE
-                          ? (_isDark ? const Color(0xFF554D44) : AppColors.brandingOrange.withValues(alpha: 0.4))
-                          : (_isDark ? const Color(0xFF65A7C2).withValues(alpha: 0.45) : Colors.blue.shade300),
-                    ),
-                  ),
-                  child: Text(
-                    isPLtoDE ? '🛫 WYWÓZ (PL ➔ DE)' : '🛬 PRZYWÓZ (DE ➔ PL)',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                      color: isPLtoDE
-                          ? (_isDark ? const Color(0xFFFFE7D0) : AppColors.brandingOrange)
-                          : (_isDark ? const Color(0xFFC7E5F2) : const Color(0xFF093F52)),
-                    ),
-                  ),
-                ),
-                const Spacer(),
-                Text(
-                  '${route.plannedDistanceKm} km',
-                  style: const TextStyle(
-                    color: AppColors.brandingOrange,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 15,
-                  ),
-                ),
-              ],
-            ),
-            Divider(height: 18, color: _borderColor),
-            Row(
-              children: [
-                const Icon(Icons.person, size: 16, color: AppColors.gray),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    route.driverName,
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: _textSecondary,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                if (route.driverPhone.isNotEmpty)
-                  InkWell(
-                    onTap: () => LauncherService.openPhone(
-                      context,
-                      route.driverPhone,
-                      route.driverName,
-                    ),
-                    borderRadius: BorderRadius.circular(6),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.phone, size: 15, color: AppColors.brandingOrange),
-                          const SizedBox(width: 4),
-                          Text(
-                            route.driverPhone,
-                            style: const TextStyle(
-                              fontSize: 14,
-                              color: AppColors.brandingOrange,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-            if (route.googleMapsUrl != null) ...[
-              const SizedBox(height: 10),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: _isDark ? Colors.white : AppColors.primary,
-                    side: BorderSide(
-                      color: _isDark ? const Color(0xFF554D44) : AppColors.brandingOrange,
-                    ),
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                  ),
-                  onPressed: () => LauncherService.openFullRoute(
-                    context,
-                    route.googleMapsUrl!,
-                  ),
-                  icon: Icon(
-                    Icons.map,
-                    size: 18,
-                    color: _isDark ? const Color(0xFFFFE7D0) : AppColors.brandingOrange,
-                  ),
-                  label: const Text(
-                    'Otwórz zaplanowaną trasę w Google Maps',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
   }
 
   Widget _buildOdometerCard(BusRoute route) {
@@ -3843,8 +3653,8 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                               Expanded(
                                 child: Text(
                                   isPLtoDE
-                                      ? 'Hotel ${stop.hotelTime ?? "--:--"} ➔ Dom ${stop.homeTime ?? "--:--"}'
-                                      : 'Dom ${stop.homeTime ?? "--:--"} ➔ Hotel ${stop.hotelTime ?? "--:--"}${stop.resort.isNotEmpty ? " (${stop.resort})" : ""}',
+                                      ? 'Hotel ${stop.hotelTime ?? "--:--"} ➔ Dom ${stop.homeTimeDisplay}'
+                                      : 'Dom ${stop.homeTimeDisplay} ➔ Hotel ${stop.hotelTime ?? "--:--"}${stop.resort.isNotEmpty ? " (${stop.resort})" : ""}',
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
                                     fontSize: 11,
@@ -4025,21 +3835,22 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Icon(
-                      Icons.location_on,
+                      stop.isTransfer ? Icons.sync_alt_rounded : Icons.location_on,
                       size: 16,
                       color: isDelivered
                           ? (_isDark ? Colors.white38 : Colors.grey)
-                          : AppColors.brandingOrange,
+                          : (stop.isTransfer ? const Color(0xFFE67E22) : AppColors.brandingOrange),
                     ),
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
-                        stop.address,
+                        stop.displayAddress,
                         style: TextStyle(
                           fontSize: 13,
+                          fontWeight: stop.isTransfer ? FontWeight.w600 : FontWeight.normal,
                           color: isDelivered
                               ? (_isDark ? Colors.white54 : Colors.black45)
-                              : _textSecondary,
+                              : (stop.isTransfer ? const Color(0xFFFFE7D0) : _textSecondary),
                         ),
                       ),
                     ),
@@ -4115,7 +3926,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                                           ),
                                         ),
                                         Text(
-                                          (isPLtoDE ? stop.hotelTime : stop.homeTime) ?? '--:--',
+                                          (isPLtoDE ? stop.hotelTime : stop.homeTimeDisplay) ?? '--:--',
                                           style: TextStyle(
                                             fontSize: 13,
                                             fontWeight: FontWeight.bold,
@@ -4148,7 +3959,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                                           ),
                                         ),
                                         Text(
-                                          (isPLtoDE ? stop.homeTime : stop.hotelTime) ?? '--:--',
+                                          (isPLtoDE ? stop.homeTimeDisplay : stop.hotelTime) ?? '--:--',
                                           style: TextStyle(
                                             fontSize: 13,
                                             fontWeight: FontWeight.bold,
@@ -4246,7 +4057,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                           padding: const EdgeInsets.symmetric(vertical: 8),
                           visualDensity: VisualDensity.compact,
                         ),
-                        onPressed: stop.address.isNotEmpty
+                        onPressed: (stop.address.isNotEmpty && !stop.isTransfer)
                             ? () => LauncherService.openNavigation(
                                   context,
                                   stop.address,
@@ -5031,5 +4842,275 @@ class _TopNoticeWidgetState extends State<_TopNoticeWidget>
     );
   }
 }
+
+/// Okno dialogowe pauzy kierowcy w stylistyce Baltic Noir (odliczanie czasu na żywo)
+class DriverBreakDialog extends StatefulWidget {
+  final DriverBreak activeBreak;
+  final String busCode;
+  final VoidCallback onEndBreak;
+
+  const DriverBreakDialog({
+    super.key,
+    required this.activeBreak,
+    required this.busCode,
+    required this.onEndBreak,
+  });
+
+  @override
+  State<DriverBreakDialog> createState() => _DriverBreakDialogState();
+}
+
+class _DriverBreakDialogState extends State<DriverBreakDialog> {
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  String _formatHms(Duration d) {
+    final hours = d.inHours.toString().padLeft(2, '0');
+    final minutes = (d.inMinutes % 60).toString().padLeft(2, '0');
+    final seconds = (d.inSeconds % 60).toString().padLeft(2, '0');
+    return '$hours:$minutes:$seconds';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final elapsed = DateTime.now().difference(widget.activeBreak.startTime);
+    final timeStr = _formatHms(elapsed);
+
+    return Dialog(
+      backgroundColor: const Color(0xFF1E1E1E),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 24.0),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: const BorderSide(
+          color: Color(0xFF383838),
+          width: 1.0,
+        ),
+      ),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 480),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Nagłówek w stylistyce okna wyboru pojazdu
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF2C2C2C),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(
+                      Icons.coffee,
+                      color: Color(0xFFFFE7D0),
+                      size: 22,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'PRZERWA KIEROWCY',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                            letterSpacing: 0.4,
+                          ),
+                        ),
+                        SizedBox(height: 2),
+                        Text(
+                          'Odliczanie czasu trwania pauzy',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: Color(0xFFB0B0B0),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white54, size: 20),
+                    onPressed: () => Navigator.pop(context),
+                    tooltip: 'Ukryj (wróć do trasy)',
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              const Divider(height: 1, color: Color(0xFF333333)),
+              const SizedBox(height: 16),
+
+              // Główna karta z zegarem cyfrowym i statusem
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 22, horizontal: 16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF252525),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0xFF383838), width: 1.0),
+                ),
+                child: Column(
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: const BoxDecoration(
+                            color: Color(0xFFFFE7D0),
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        const Text(
+                          'CZAS TRWANIA PAUZY',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 1.2,
+                            color: Color(0xFFB0B0B0),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      timeStr,
+                      style: const TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 44,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFFFFE7D0),
+                        letterSpacing: 2.0,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Pauza aktywna • Czas nalicza się automatycznie',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFFB0B0B0),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+
+              // Belka informacyjna: godzina startu i pojazd
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF232323),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFF333333)),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.play_circle_outline, size: 16, color: Color(0xFFB0B0B0)),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Rozpoczęto: ${widget.activeBreak.startTime.hour.toString().padLeft(2, '0')}:${widget.activeBreak.startTime.minute.toString().padLeft(2, '0')}:${widget.activeBreak.startTime.second.toString().padLeft(2, '0')}',
+                          style: const TextStyle(fontSize: 12.5, color: Colors.white70),
+                        ),
+                      ],
+                    ),
+                    Text(
+                      'Bus: ${widget.busCode}',
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFFFFE7D0),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 18),
+
+              // Przyciski akcji
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFFB0B0B0),
+                        side: const BorderSide(color: Color(0xFF383838), width: 1.0),
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Wróć do trasy', style: TextStyle(fontSize: 14)),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    flex: 2,
+                    child: FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF36322E),
+                        foregroundColor: const Color(0xFFFFE7D0),
+                        side: const BorderSide(
+                          color: Color(0xFF554D44),
+                          width: 1.0,
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        elevation: 0,
+                      ),
+                      icon: const Icon(Icons.stop_circle_outlined, size: 19),
+                      label: const Text(
+                        'Zakończ przerwę',
+                        style: TextStyle(
+                          fontSize: 14.5,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 0.3,
+                        ),
+                      ),
+                      onPressed: () {
+                        widget.onEndBreak();
+                        Navigator.pop(context);
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+
 
 

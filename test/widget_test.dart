@@ -18,10 +18,10 @@ void main() {
     expect(find.textContaining('BB.01'), findsWidgets);
     expect(find.textContaining('Ford Custom'), findsWidgets);
 
-    // Switch to Tab 1: Pojazd & Paliwo to verify driver details
-    await tester.tap(find.text('Pojazd & Paliwo'));
+    // Switch to Tab 1: Tankowanie
+    await tester.tap(find.text('Tankowanie'));
     await tester.pumpAndSettle();
-    expect(find.textContaining('Grzesiek Korowajczyk'), findsWidgets);
+    expect(find.text('Paliwo i Tankowania'), findsOneWidget);
 
     // Switch back to Tab 0: Trasa
     await tester.tap(find.text('Trasa'));
@@ -174,12 +174,12 @@ void main() {
 
     // Tab 0: Trasa & Pasażerowie
     expect(find.text('Trasa'), findsOneWidget);
-    expect(find.text('Pojazd & Paliwo'), findsOneWidget);
+    expect(find.text('Tankowanie'), findsOneWidget);
     expect(find.text('Raporty & Czas'), findsOneWidget);
     expect(find.text('Angelika Borchert'), findsOneWidget);
 
-    // Switch to Tab 1: Pojazd & Paliwo
-    await tester.tap(find.text('Pojazd & Paliwo'));
+    // Switch to Tab 1: Tankowanie
+    await tester.tap(find.text('Tankowanie'));
     await tester.pumpAndSettle();
     expect(find.text('Paliwo i Tankowania'), findsOneWidget);
     expect(find.text('START'), findsOneWidget);
@@ -191,5 +191,61 @@ void main() {
     expect(find.text('Czas Pracy & Pauzy'), findsOneWidget);
     expect(find.text('Zaliczka i Finanse'), findsOneWidget);
     expect(find.text('Centrum Raportowania'), findsOneWidget);
+  });
+
+  testWidgets('Driver Break modal dialog live timer and tacho milestones test', (WidgetTester tester) async {
+    SharedPreferences.setMockInitialValues({});
+    await tester.pumpWidget(const BalticBusApp());
+    await tester.pumpAndSettle();
+
+    // Verify Pauza pill is visible in the Route header
+    expect(find.text('Pauza'), findsOneWidget);
+
+    // 1. Tap "Pauza" to start break and open modal dialog
+    await tester.tap(find.text('Pauza'));
+    await tester.pumpAndSettle();
+
+    // Verify modal dialog appears with title and live timer
+    expect(find.text('PRZERWA KIEROWCY'), findsOneWidget);
+    expect(find.text('CZAS TRWANIA PAUZY'), findsOneWidget);
+    expect(find.text('Wróć do trasy'), findsOneWidget);
+    expect(find.text('Zakończ przerwę'), findsOneWidget);
+
+    // 2. Tap "Wróć do trasy" to minimize dialog while break continues
+    await tester.tap(find.text('Wróć do trasy'));
+    await tester.pumpAndSettle();
+
+    // Dialog is dismissed, break pill shows active state 'Pauza w toku'
+    expect(find.text('PRZERWA KIEROWCY'), findsNothing);
+    expect(find.text('Pauza w toku'), findsOneWidget);
+
+    // 3. Tap 'Pauza w toku' to re-open the live dialog
+    await tester.tap(find.text('Pauza w toku'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('PRZERWA KIEROWCY'), findsOneWidget);
+
+    // 4. Tap "Zakończ przerwę" to end the break
+    await tester.tap(find.text('Zakończ przerwę'));
+    await tester.pumpAndSettle();
+
+    // Verify dialog is closed and pill is reset to 'Pauza'
+    expect(find.text('PRZERWA KIEROWCY'), findsNothing);
+    expect(find.text('Pauza'), findsOneWidget);
+  });
+
+  test('PassengerStop with address XXX displays przesiadka instead of dashes', () {
+    final stop = PassengerStop(
+      order: 1,
+      name: 'Ljubow Herbst',
+      address: 'XXX',
+      passengerCount: 1,
+      phone: '15754714628',
+      hotelTime: '08:10',
+    );
+
+    expect(stop.isTransfer, isTrue);
+    expect(stop.displayAddress, 'Przesiadka (brak adresu domowego)');
+    expect(stop.homeTimeDisplay, 'przesiadka');
   });
 }

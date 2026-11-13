@@ -42,6 +42,39 @@ class PassengerStop {
     this.deliveredAt,
     this.isCollapsed = true,
   });
+
+  /// Pasażer przesiadkowy (brak adresu domowego w Niemczech, w Excelu oznaczone jako XXX)
+  bool get isTransfer {
+    final clean = address.trim().toUpperCase();
+    return clean == 'XXX' ||
+        clean.startsWith('XXX') ||
+        clean.contains('PRZESIADKA') ||
+        comment.toUpperCase().contains('PRZESIADKA') ||
+        office.toUpperCase().contains('PRZESIADKA');
+  }
+
+  /// Czytelny adres pasażera (gdy w Excelu jest XXX, informuje o przesiadce)
+  String get displayAddress {
+    final clean = address.trim().toUpperCase();
+    if (clean == 'XXX' || clean.isEmpty) {
+      return 'Przesiadka (brak adresu domowego)';
+    }
+    return address;
+  }
+
+  /// Wyświetlanie godziny domowej lub 'przesiadka' zamiast kresek
+  String get homeTimeDisplay {
+    if (homeTime != null &&
+        homeTime!.isNotEmpty &&
+        homeTime != '--:--' &&
+        homeTime!.toUpperCase() != 'XXX') {
+      return homeTime!;
+    }
+    if (isTransfer) {
+      return 'przesiadka';
+    }
+    return '--:--';
+  }
 }
 
 class TransferPoint {
