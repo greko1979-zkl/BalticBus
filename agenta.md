@@ -23,6 +23,11 @@ Niniejszy dokument określa ramy współpracy, uprawnienia oraz ograniczenia age
     - **Architektura i przepływ danych:** diagramy blokowe / sekwencji (Mermaid), obrazujące jak płyną dane i stany.
     - **Logika biznesowa:** schematy decyzyjne i porównania stanu "Przed" vs "Po".
 
+- 📦 **BUDOWANIE PACZEK PRODUKCYJNYCH (AAB DLA GOOGLE PLAY):**
+  - **Bezwzględny zakaz samowolnego budowania paczki AAB:** Budowanie (`flutter build appbundle` / `apk`) może nastąpić **WYŁĄCZNIE na wyraźne polecenie użytkownika**.
+  - **Automatyczne podbijanie wersji i kompilacji:** Za każdym razem, gdy użytkownik zleci zadanie zbudowania paczki `.aab`, agent ma obowiązek **samodzielnie podbić kod wersji / numer kompilacji (`versionCode` w `pubspec.yaml`, np. `+1` do aktualnego numeru)**.
+  - **Obowiązkowe powiadomienie:** Agent musi **niezwłocznie i wyraźnie powiadomić użytkownika**, do jakiej nowej wersji i numeru kompilacji podbił aplikację.
+
 ---
 
 ## 3. Co WOLNO robić (Zalecenia i uprawnienia)
@@ -59,6 +64,8 @@ Niniejszy dokument określa ramy współpracy, uprawnienia oraz ograniczenia age
   - Zakaz modyfikacji bez odczytania rzeczywistej zawartości plików i zakaz podawania zmyślonych wyników testów/metryk.
 - ❌ **Zakaz destrukcyjnych operacji:**
   - Zakaz usuwania plików, branchy, historii gita (`git reset --hard`, `git push --force`) bez wyraźnego polecenia.
+- ❌ **Zakaz samowolnego budowania paczek wydań:**
+  - Zakaz uruchamiania `flutter build appbundle` lub `flutter build apk` bez bezpośredniego, wyraźnego polecenia użytkownika.
 - ❌ **Zakaz ignorowania błędów:**
   - Nie wolno pozostawiać kodu z błędami kompilatora, lintera ani uszkodzonymi zależnościami.
 
