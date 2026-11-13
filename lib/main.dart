@@ -28,21 +28,10 @@ void main() async {
   BalticBusApp.themeNotifier.value = isDark ? ThemeMode.dark : ThemeMode.light;
 
   final savedPalette = await StorageService.loadPaletteTheme();
-  if (savedPalette == 'warmGrey') {
-    AppColors.currentTheme.value = AppThemeStyle.warmGrey;
-  } else if (savedPalette == 'balticOcean') {
-    AppColors.currentTheme.value = AppThemeStyle.balticOcean;
-  } else if (savedPalette == 'walnutNoir') {
-    AppColors.currentTheme.value = AppThemeStyle.walnutNoir;
-  } else if (savedPalette == 'emeraldDepth') {
-    AppColors.currentTheme.value = AppThemeStyle.emeraldDepth;
-  } else if (savedPalette == 'charcoalNoir') {
-    AppColors.currentTheme.value = AppThemeStyle.charcoalNoir;
-  } else if (savedPalette == 'balticOrange') {
-    AppColors.currentTheme.value = AppThemeStyle.balticOrange;
-  } else {
-    AppColors.currentTheme.value = AppThemeStyle.balticNoir;
-  }
+  AppColors.currentTheme.value = AppThemeStyle.values.firstWhere(
+    (s) => s.name == savedPalette,
+    orElse: () => AppThemeStyle.balticNoir,
+  );
 
   final initialHasActiveTrip = await StorageService.hasActiveTrip();
   runApp(BalticBusApp(initialHasActiveTrip: initialHasActiveTrip));
@@ -1507,13 +1496,13 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
           ],
         ),
         body: _isLoading
-            ? const Center(
+            ? Center(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    CircularProgressIndicator(color: AppColors.brandingOrange),
-                    SizedBox(height: 16),
-                    Text(
+                    CircularProgressIndicator(color: activeTheme.border),
+                    const SizedBox(height: 16),
+                    const Text(
                       'Wczytywanie trasy...',
                       style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
                     ),
@@ -1537,13 +1526,19 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
 
   Widget _buildBottomNavigationBar(BusRoute route) {
     final isDark = _isDark;
+    final theme = AppColors.activeTheme;
+    final selectedColor = theme.style == AppThemeStyle.balticNoir
+        ? const Color(0xFFFFE7D0)
+        : (theme.style == AppThemeStyle.balticOrange
+            ? AppColors.brandingOrange
+            : theme.secondaryAccent);
 
     return Container(
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF0C1014).withValues(alpha: 0.96) : Colors.white.withValues(alpha: 0.96),
         border: Border(
           top: BorderSide(
-            color: AppColors.activeTheme.border.withValues(alpha: 0.40),
+            color: theme.border.withValues(alpha: 0.40),
             width: 1.2,
           ),
         ),
@@ -1562,7 +1557,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
           onTap: (index) => setState(() => _currentTabIndex = index),
           backgroundColor: Colors.transparent,
           elevation: 0,
-          selectedItemColor: AppColors.brandingOrange,
+          selectedItemColor: selectedColor,
           unselectedItemColor: Colors.white60,
           selectedFontSize: 12,
           unselectedFontSize: 11,
@@ -1804,7 +1799,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
       decoration: _convexDecoration(
         borderRadius: BorderRadius.circular(16),
         borderColor: _isDark
-            ? const Color(0xFFFFE7D0).withValues(alpha: 0.60)
+            ? AppColors.activeTheme.secondaryAccent.withValues(alpha: 0.70)
             : AppColors.brandingOrange.withValues(alpha: 0.85),
         borderWidth: 1.3,
         isHighlighted: true,
@@ -2307,11 +2302,12 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Row(
+              Row(
                 children: [
-                  Icon(Icons.local_gas_station, color: AppColors.brandingOrange, size: 20),
-                  SizedBox(width: 8),
-                  Text(
+                  Icon(Icons.local_gas_station,
+                      color: _isDark ? AppColors.activeTheme.secondaryAccent : AppColors.brandingOrange, size: 20),
+                  const SizedBox(width: 8),
+                  const Text(
                     'Paliwo i Tankowania',
                     style: TextStyle(
                       fontSize: 16,
@@ -2323,7 +2319,8 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
               ),
               FilledButton.icon(
                 style: FilledButton.styleFrom(
-                  backgroundColor: AppColors.brandingOrange,
+                  backgroundColor: _isDark ? AppColors.activeTheme.primaryAccent : AppColors.brandingOrange,
+                  foregroundColor: _isDark ? AppColors.activeTheme.secondaryAccent : Colors.white,
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   visualDensity: VisualDensity.compact,
                 ),
@@ -2714,11 +2711,12 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Row(
+              Row(
                 children: [
-                  Icon(Icons.assignment, color: AppColors.brandingOrange, size: 20),
-                  SizedBox(width: 8),
-                  Text(
+                  Icon(Icons.assignment,
+                      color: _isDark ? AppColors.activeTheme.secondaryAccent : AppColors.brandingOrange, size: 20),
+                  const SizedBox(width: 8),
+                  const Text(
                     'Centrum Raportowania',
                     style: TextStyle(
                       fontSize: 16,
@@ -2732,7 +2730,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
               // Przycisk Plan Jazdy
               _buildReportActionRow(
                 icon: Icons.assignment_outlined,
-                accentColor: AppColors.brandingOrange,
+                accentColor: _isDark ? AppColors.activeTheme.secondaryAccent : AppColors.brandingOrange,
                 title: 'Otwórz pełny Plan Jazdy',
                 subtitle: 'Kompletne podsumowanie weekendu, tabelka km i rozliczenie',
                 onTap: _showPlanJazdyDialog,
@@ -3525,7 +3523,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
         statusIcon = Icons.block;
         break;
       case PickupStatus.pending:
-        statusColor = _isDark ? const Color(0xFFFFE7D0) : AppColors.brandingOrange;
+        statusColor = _isDark ? AppColors.activeTheme.secondaryAccent : AppColors.brandingOrange;
         statusText = 'Oczekuje';
         statusIcon = Icons.schedule;
         break;
@@ -3541,7 +3539,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
           borderRadius: BorderRadius.circular(12),
           borderColor: isDelivered
               ? (_isDark ? Colors.white.withValues(alpha: 0.12) : Colors.grey.shade400)
-              : (_isDark ? const Color(0xFF554D44) : statusColor.withValues(alpha: 0.70)),
+              : (_isDark ? AppColors.activeTheme.border.withValues(alpha: 0.55) : statusColor.withValues(alpha: 0.70)),
           borderWidth: 1.0,
           isHighlighted: false,
           baseStartColor: isDelivered
@@ -3696,7 +3694,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
           borderRadius: BorderRadius.circular(14),
           borderColor: isDelivered
               ? (_isDark ? Colors.white.withValues(alpha: 0.14) : Colors.grey.shade400)
-              : (_isDark ? const Color(0xFF554D44) : statusColor.withValues(alpha: 0.75)),
+              : (_isDark ? AppColors.activeTheme.border.withValues(alpha: 0.65) : statusColor.withValues(alpha: 0.75)),
           borderWidth: isDelivered ? 1.0 : 1.2,
           isHighlighted: false,
           baseStartColor: isDelivered
@@ -3721,7 +3719,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                       radius: 14,
                       backgroundColor: isDelivered
                           ? (_isDark ? Colors.white24 : Colors.grey)
-                          : AppColors.primary,
+                          : (_isDark ? AppColors.activeTheme.primaryAccent : AppColors.primary),
                       child: Text(
                         '${stop.order}',
                         style: const TextStyle(

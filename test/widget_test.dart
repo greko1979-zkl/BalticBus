@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:archive/archive.dart';
 import 'package:balticbus/models/route_models.dart';
 import 'package:balticbus/services/docx_report_service.dart';
+import 'package:balticbus/theme/app_colors.dart';
 import 'package:balticbus/main.dart';
 
 void main() {
@@ -247,5 +248,28 @@ void main() {
     expect(stop.isTransfer, isTrue);
     expect(stop.displayAddress, 'Przesiadka (brak adresu domowego)');
     expect(stop.homeTimeDisplay, 'przesiadka');
+  });
+
+  testWidgets('Theme selector displays exactly the 3 active themes: Baltic Noir, Baltic Orange, Charcoal Noir',
+      (WidgetTester tester) async {
+    SharedPreferences.setMockInitialValues({});
+    await tester.pumpWidget(const BalticBusApp());
+    await tester.pumpAndSettle();
+
+    // 1. Open theme selector sheet via palette icon in AppBar
+    final paletteBtn = find.byIcon(Icons.palette_outlined);
+    expect(paletteBtn, findsOneWidget);
+    await tester.tap(paletteBtn);
+    await tester.pumpAndSettle();
+
+    // 2. Verify exactly the 3 chosen themes are present
+    expect(find.text('BALTIC NOIR'), findsOneWidget);
+    expect(find.text('BALTIC ORANGE'), findsOneWidget);
+    expect(find.text('CHARCOAL NOIR'), findsOneWidget);
+
+    // 3. Select BALTIC ORANGE
+    await tester.tap(find.text('BALTIC ORANGE'));
+    await tester.pumpAndSettle();
+    expect(AppColors.currentTheme.value, AppThemeStyle.balticOrange);
   });
 }
