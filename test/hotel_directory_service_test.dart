@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:balticbus/models/route_models.dart';
 import 'package:balticbus/services/hotel_directory_service.dart';
 import 'package:balticbus/services/storage_service.dart';
 
@@ -8,6 +9,7 @@ void main() {
 
   setUp(() {
     SharedPreferences.setMockInitialValues({});
+    HotelDirectoryService.resetCache();
   });
 
   group('HotelDirectoryService Tests', () {
@@ -98,6 +100,96 @@ void main() {
 
       await HotelDirectoryService.deleteHotel('Hotel DoUsuniecia');
       expect(HotelDirectoryService.getCachedHotel('Hotel DoUsuniecia'), isNull);
+    });
+
+    test('ingestHotelsFromRoutes discovers and persists new resorts automatically', () async {
+      final mockStops = [
+        PassengerStop(
+          order: 1,
+          name: 'Jan Kowalski',
+          address: 'Berlin',
+          passengerCount: 1,
+          phone: '',
+          resort: 'Nowy Kurort (Dźwirzyno)',
+          hotelTime: '08:00',
+        ),
+        PassengerStop(
+          order: 2,
+          name: 'Anna Nowak',
+          address: 'Hamburg',
+          passengerCount: 1,
+          phone: '',
+          resort: 'Meduza',
+          hotelTime: '08:30',
+        ),
+        PassengerStop(
+          order: 3,
+          name: 'Piotr Zieliński',
+          address: 'Bremen',
+          passengerCount: 1,
+          phone: '',
+          resort: 'San', // Already exists in defaultHotels with address
+          hotelTime: '09:00',
+        ),
+      ];
+
+      final mockRoute = BusRoute(
+        id: 'test_route',
+        code: 'BB.01',
+        title: 'Trasa testowa',
+        date: '2026-08-01',
+        direction: 'PL-DE',
+        vehicleModel: 'Ford',
+        registrationNumber: 'ZS1234',
+        driverName: 'Kierowca Testowy',
+        driverPhone: '123456789',
+        plannedDistanceKm: 1200,
+        stops: mockStops,
+      );
+
+      final added = await HotelDirectoryService.ingestHotelsFromRoutes([mockRoute]);
+      expect(added, 2); // Nowy Kurort and Meduza added, San was not added again
+
+      final kurort = HotelDirectoryService.getCachedHotel('Nowy Kurort');
+      expect(kurort, isNotNull);
+      expect(kurort!.name, 'Nowy Kurort');
+      expect(kurort.city, 'Dźwirzyno');
+
+      final meduza = HotelDirectoryService.getCachedHotel('Meduza');
+      expect(meduza, isNotNull);
+      expect(meduza!.name, 'Meduza');
+      expect(meduza.fromList, isTrue);
+
+      final grouped = HotelDirectoryService.getHotelsGroupedByCitySync();
+      expect(grouped.containsKey('Dodane z listy'), isTrue);
+      expect(grouped['Dodane z listy']!.any((h) => h.name == 'Nowy Kurort'), isTrue);
+      expect(grouped['Dodane z listy']!.any((h) => h.name == 'Meduza'), isTrue);
+
+      // Dopóki nie ma adresu, nie powinien się pojawiać w normalnych miastach
+      expect(grouped['Dźwirzyno']?.any((h) => h.name == 'Nowy Kurort') ?? false, isFalse);
+    });
+
+    test('hotels with empty address are grouped in Dodane z listy until address is set', () async {
+      await HotelDirectoryService.saveHotel(
+        name: 'Hotel Bez Adresu',
+        address: '',
+        city: 'Kołobrzeg',
+      );
+
+      var grouped = HotelDirectoryService.getHotelsGroupedByCitySync();
+      expect(grouped['Dodane z listy']!.any((h) => h.name == 'Hotel Bez Adresu'), isTrue);
+
+      // Po wpisaniu adresu znika z "Dodane z listy"
+      await HotelDirectoryService.saveHotel(
+        name: 'Hotel Bez Adresu',
+        address: 'ul. Nadbrzeżna 10',
+        city: 'Kołobrzeg',
+        fromList: false,
+      );
+
+      grouped = HotelDirectoryService.getHotelsGroupedByCitySync();
+      final inPending = grouped['Dodane z listy']?.any((h) => h.name == 'Hotel Bez Adresu') ?? false;
+      expect(inPending, isFalse);
     });
   });
 }

@@ -280,12 +280,14 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
       try {
         final parsed = await ExcelParserService.loadFromAssets();
         if (parsed.isNotEmpty && mounted) {
+          await HotelDirectoryService.ingestHotelsFromRoutes(parsed);
           setState(() {
             _allRoutes = parsed;
           });
         }
       } catch (_) {
         if (_allRoutes.isEmpty && mounted) {
+          await HotelDirectoryService.ingestHotelsFromRoutes(sampleBusRoutes);
           setState(() {
             _allRoutes = sampleBusRoutes;
           });
@@ -372,10 +374,11 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
     if (mounted) setState(() {});
   }
 
-  Future<void> _importFromAssets() async {
+  Future<void> _importFromAssets([String assetPath = 'assets/data/WEEK_01-02.08.2026.xlsx']) async {
     setState(() => _isLoading = true);
+    final fileName = assetPath.split('/').last;
     try {
-      final routes = await ExcelParserService.loadFromAssets();
+      final routes = await ExcelParserService.loadFromAssets(assetPath);
       if (routes.isNotEmpty) {
         await StorageService.setHasActiveTrip(true);
         final busCodes = routes.map((r) => r.code).toSet().toList();
@@ -395,9 +398,19 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
           _isLoading = false;
         });
 
+        // Automatyczne wykrycie i dodanie nowych hoteli do stałej bazy
+        final newHotelsCount = await HotelDirectoryService.ingestHotelsFromRoutes(routes);
+
         if (mounted) {
+          if (newHotelsCount > 0) {
+            _showNotice(
+              'Wykryto i dodano $newHotelsCount nowych hoteli do katalogu!',
+              Icons.hotel_rounded,
+              _isDark ? AppColors.activeTheme.secondaryAccent : AppColors.brandingOrange,
+            );
+          }
           if (busCodes.length > 1) {
-            await _showBusSelectionDialog(busCodes, routes, 'WEEK_01-02.08.2026.xlsx');
+            await _showBusSelectionDialog(busCodes, routes, fileName);
           } else {
             await _restoreStateForRoute(_currentRoute);
             if (mounted) {
@@ -418,11 +431,112 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
     }
   }
 
+  void _showPreloadedTripsPicker() {
+    const trips = [
+      {'name': 'WEEK_01-02.08.2026.xlsx', 'label': '01 - 02 Sierpnia 2026', 'path': 'assets/data/WEEK_01-02.08.2026.xlsx'},
+      {'name': 'WEEK_08-09.08.2026.xlsx', 'label': '08 - 09 Sierpnia 2026', 'path': 'assets/data/WEEK_08-09.08.2026.xlsx'},
+      {'name': 'WEEK_15-16.08.2026.xlsx', 'label': '15 - 16 Sierpnia 2026', 'path': 'assets/data/WEEK_15-16.08.2026.xlsx'},
+      {'name': 'WEEK_22-23.08.2026.xlsx', 'label': '22 - 23 Sierpnia 2026', 'path': 'assets/data/WEEK_22-23.08.2026.xlsx'},
+      {'name': 'WEEK_29-30.08.2026.xlsx', 'label': '29 - 30 Sierpnia 2026', 'path': 'assets/data/WEEK_29-30.08.2026.xlsx'},
+      {'name': 'WEEK_18-19.07.2026.xlsx', 'label': '18 - 19 Lipca 2026', 'path': 'assets/data/WEEK_18-19.07.2026.xlsx'},
+      {'name': 'WEEK_25-26.07.2026.xlsx', 'label': '25 - 26 Lipca 2026', 'path': 'assets/data/WEEK_25-26.07.2026.xlsx'},
+      {'name': 'WEEK_14-15.11.2026.xlsx', 'label': '14 - 15 Listopada 2026', 'path': 'assets/data/WEEK_14-15.11.2026.xlsx'},
+      {'name': 'WEEK_03-04.01.2026.xlsx', 'label': '03 - 04 Stycznia 2026', 'path': 'assets/data/WEEK_03-04.01.2026.xlsx'},
+    ];
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: _cardBg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        side: BorderSide(color: Color(0xFF383838), width: 1.0),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: _isDark ? const Color(0xFF5A391E) : AppColors.brandingOrange.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: _isDark ? const Color(0xFFD48B47) : AppColors.brandingOrange),
+                    ),
+                    child: Icon(
+                      Icons.folder_shared_rounded,
+                      color: _isDark ? const Color(0xFFFFD4A8) : AppColors.brandingOrange,
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Katalog wyjazdów BalticBus',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: _textPrimary,
+                          ),
+                        ),
+                        Text(
+                          'Wybierz gotowy weekend z listy (B.B. wyjazdy)',
+                          style: TextStyle(fontSize: 12, color: _textSecondary),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Flexible(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: trips.length,
+                  itemBuilder: (context, index) {
+                    final t = trips[index];
+                    return ListTile(
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                      leading: const CircleAvatar(
+                        radius: 16,
+                        backgroundColor: Color(0xFF2C2A28),
+                        child: Icon(Icons.table_chart_rounded, size: 16, color: Color(0xFFFFE7D0)),
+                      ),
+                      title: Text(
+                        t['name']!,
+                        style: TextStyle(color: _textPrimary, fontSize: 13.5, fontWeight: FontWeight.bold),
+                      ),
+                      subtitle: Text(
+                        t['label']!,
+                        style: TextStyle(color: _textSecondary, fontSize: 12),
+                      ),
+                      trailing: const Icon(Icons.chevron_right, size: 18, color: Colors.grey),
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        _importFromAssets(t['path']!);
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _pickExcelFile() async {
     try {
       final result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['xlsx', 'xls'],
+        type: FileType.any,
         withData: true,
       );
 
@@ -455,8 +569,18 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
               _isLoading = false;
             });
 
+            // Automatyczne wykrycie i dodanie nowych hoteli do stałej bazy
+            final newHotelsCount = await HotelDirectoryService.ingestHotelsFromRoutes(routes);
+
             // Jeśli jest więcej niż 1 bus, pokaż okno wyboru busa i kierowcy
             if (mounted) {
+              if (newHotelsCount > 0) {
+                _showNotice(
+                  'Wykryto i dodano $newHotelsCount nowych hoteli do katalogu!',
+                  Icons.hotel_rounded,
+                  _isDark ? AppColors.activeTheme.secondaryAccent : AppColors.brandingOrange,
+                );
+              }
               if (busCodes.length > 1) {
                 await _showBusSelectionDialog(busCodes, routes, file.name);
               } else {
@@ -721,6 +845,18 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
               const SizedBox(height: 12),
               ListTile(
                 leading: const CircleAvatar(
+                  backgroundColor: Color(0xFF5A391E),
+                  child: Icon(Icons.folder_shared_rounded, color: Color(0xFFFFD4A8), size: 20),
+                ),
+                title: Text('Wybierz wyjazd z katalogu (B.B. wyjazdy)', style: TextStyle(color: _textPrimary, fontWeight: FontWeight.bold)),
+                subtitle: Text('Szybki wybór spośród wszystkich weekendów (lipiec, sierpień, listopad, styczeń)', style: TextStyle(color: _textSecondary)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showPreloadedTripsPicker();
+                },
+              ),
+              ListTile(
+                leading: const CircleAvatar(
                   backgroundColor: Color(0xFF36322E),
                   child: Icon(Icons.file_upload, color: Color(0xFFFFE7D0), size: 20),
                 ),
@@ -731,19 +867,6 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                   _pickExcelFile();
                 },
               ),
-              if (_showDevOptions)
-                ListTile(
-                  leading: const CircleAvatar(
-                    backgroundColor: AppColors.primary,
-                    child: Icon(Icons.calendar_month, color: Colors.white, size: 20),
-                  ),
-                  title: Text('Wczytaj WEEK_01-02.08.2026.xlsx (Test)', style: TextStyle(color: _textPrimary)),
-                  subtitle: Text('Załaduj cały weekend dla wszystkich busów (BB.01 - BB.10)', style: TextStyle(color: _textSecondary)),
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    _importFromAssets();
-                  },
-                ),
               if (_allRoutes.isNotEmpty) ...[
                 const Divider(),
                 ListTile(
@@ -3185,13 +3308,17 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
         final previewHotels = hotels.take(3).map((h) => h.name).join(', ');
         final moreCount = hotels.length > 3 ? ' +${hotels.length - 3}' : '';
 
+        final isFromList = city == 'Dodane z listy';
+
         return Container(
           margin: const EdgeInsets.only(bottom: 10),
           decoration: _convexDecoration(
             borderRadius: BorderRadius.circular(14),
-            borderColor: _borderColor,
-            borderWidth: 1.1,
-            isHighlighted: false,
+            borderColor: isFromList
+                ? (_isDark ? const Color(0xFFD48B47) : AppColors.brandingOrange)
+                : _borderColor,
+            borderWidth: isFromList ? 1.4 : 1.1,
+            isHighlighted: isFromList,
           ),
           child: Material(
             color: Colors.transparent,
@@ -3206,14 +3333,16 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                     Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: _isDark
-                            ? Colors.white.withValues(alpha: 0.06)
-                            : Colors.black.withValues(alpha: 0.04),
+                        color: isFromList
+                            ? (_isDark ? const Color(0xFF5A391E) : AppColors.brandingOrange.withValues(alpha: 0.15))
+                            : (_isDark ? Colors.white.withValues(alpha: 0.06) : Colors.black.withValues(alpha: 0.04)),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Icon(
-                        Icons.location_city_rounded,
-                        color: _isDark ? AppColors.activeTheme.secondaryAccent : _textSecondary,
+                        isFromList ? Icons.playlist_add_check_circle_rounded : Icons.location_city_rounded,
+                        color: isFromList
+                            ? (_isDark ? const Color(0xFFFFD4A8) : AppColors.brandingOrange)
+                            : (_isDark ? AppColors.activeTheme.secondaryAccent : _textSecondary),
                         size: 24,
                       ),
                     ),
@@ -3229,30 +3358,40 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                                 style: TextStyle(
                                   fontSize: 16,
                                   fontWeight: FontWeight.bold,
-                                  color: _textPrimary,
+                                  color: isFromList
+                                      ? (_isDark ? const Color(0xFFFFD4A8) : AppColors.brandingOrange)
+                                      : _textPrimary,
                                 ),
                               ),
                               const SizedBox(width: 8),
                               _buildBrandBadge(
                                 '${hotels.length} ${hotels.length == 1 ? 'obiekt' : (hotels.length < 5 ? 'obiekty' : 'obiektów')}',
-                                _isDark ? AppColors.activeTheme.secondaryAccent : _textSecondary,
+                                isFromList
+                                    ? (_isDark ? const Color(0xFFD48B47) : AppColors.brandingOrange)
+                                    : (_isDark ? AppColors.activeTheme.secondaryAccent : _textSecondary),
                               ),
                             ],
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            '$previewHotels$moreCount',
+                            isFromList ? 'Nowe obiekty do uzupełnienia adresu: $previewHotels$moreCount' : '$previewHotels$moreCount',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                               fontSize: 12,
-                              color: _textSecondary,
+                              color: isFromList ? (_isDark ? const Color(0xFFFFE7D0) : _textPrimary) : _textSecondary,
                             ),
                           ),
                         ],
                       ),
                     ),
-                    const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppColors.gray),
+                    Icon(
+                      Icons.arrow_forward_ios_rounded,
+                      size: 14,
+                      color: isFromList
+                          ? (_isDark ? const Color(0xFFFFD4A8) : AppColors.brandingOrange)
+                          : AppColors.gray,
+                    ),
                   ],
                 ),
               ),
@@ -3407,6 +3546,11 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                               hotel.city,
                               _isDark ? AppColors.activeTheme.secondaryAccent : _textSecondary,
                             ),
+                            if (hotel.fromList)
+                              _buildBrandBadge(
+                                'Z listy przejazdu',
+                                const Color(0xFFE67300),
+                              ),
                           ],
                         ),
                       ],
@@ -3514,7 +3658,12 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                         padding: const EdgeInsets.symmetric(vertical: 8),
                         visualDensity: VisualDensity.compact,
                       ),
-                      onPressed: () => LauncherService.openNavigation(context, hotel.fullAddress),
+                      onPressed: () {
+                        final navTarget = hotel.address.isNotEmpty
+                            ? hotel.fullAddress
+                            : '${hotel.name}, ${hotel.city}';
+                        LauncherService.openNavigation(context, navTarget);
+                      },
                       icon: Icon(
                         Icons.near_me_rounded,
                         size: 16,
@@ -4977,14 +5126,14 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                                 visualDensity: VisualDensity.compact,
                               ),
                               onPressed: () {
-                                if (hotelInfo != null && hotelInfo.fullAddress.isNotEmpty) {
+                                if (hotelInfo != null && hotelInfo.address.isNotEmpty) {
                                   LauncherService.openNavigation(context, hotelInfo.fullAddress);
                                 } else {
-                                  _showNotice(
-                                    'Brak adresu dla ${stop.resort}. Uzupełnij w zakładce Hotele.',
-                                    Icons.info_outline,
-                                    _isDark ? AppColors.activeTheme.secondaryAccent : AppColors.brandingOrange,
-                                  );
+                                  // Jeśli brak dokładnego adresu ulicy, nawiguj do miejscowości i nazwy hotelu (Google Maps sam go znajdzie)
+                                  final searchTarget = hotelInfo != null && hotelInfo.city.isNotEmpty
+                                      ? '${stop.resort}, ${hotelInfo.city}'
+                                      : stop.resort;
+                                  LauncherService.openNavigation(context, searchTarget);
                                 }
                               },
                               icon: Icon(
@@ -5339,10 +5488,11 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                 // Miejscowość
                 TextField(
                   controller: cityCtrl,
+                  textCapitalization: TextCapitalization.words,
                   style: TextStyle(color: _textPrimary, fontSize: 14),
                   decoration: InputDecoration(
                     labelText: 'Miejscowość *',
-                    hintText: 'np. Kołobrzeg',
+                    hintText: 'np. Kołobrzeg, Dziwnówek, Pobierowo',
                     labelStyle: TextStyle(color: _textSecondary),
                     hintStyle: const TextStyle(color: Colors.grey, fontSize: 13),
                     prefixIcon: const Icon(Icons.location_city_outlined, size: 20),
@@ -5457,7 +5607,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
               onPressed: () async {
                 final newName = nameCtrl.text.trim();
                 final newAddr = addressCtrl.text.trim();
-                final newCity = cityCtrl.text.trim();
+                final newCity = cityCtrl.text.trim().isEmpty ? 'Kołobrzeg' : cityCtrl.text.trim();
                 final newNote = noteCtrl.text.trim();
                 if (newName.isEmpty) {
                   _showNotice('Wpisz nazwę hotelu', Icons.warning_amber_rounded, Colors.orangeAccent);
@@ -5469,10 +5619,13 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                   address: newAddr,
                   city: newCity,
                   note: newNote.isNotEmpty ? newNote : null,
+                  fromList: newAddr.isEmpty, // Jeśli adres nadal jest pusty, pozostaje w 'Dodane z listy'
                 );
                 if (mounted) {
-                  setState(() {});
-                  _showNotice('Zapisano hotel $newName', Icons.check_circle, Colors.greenAccent);
+                  setState(() {
+                    _selectedHotelCity = null; // Powrót do widoku wszystkich miast, aby nowy kafelek był widoczny
+                  });
+                  _showNotice('Zapisano hotel $newName ($newCity)', Icons.check_circle, Colors.greenAccent);
                 }
               },
               icon: const Icon(Icons.save_rounded, size: 18),
