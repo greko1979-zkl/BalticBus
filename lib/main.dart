@@ -1596,33 +1596,28 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
 
   // TAB 0: TRASA & PASAŻEROWIE
   Widget _buildRouteTab(BusRoute route, bool isPLtoDE) {
-    // Bieżący cel podróży (pasażer wieziony jako pierwszy)
+    // 1. Sprawdzamy, czy trwa jeszcze etap zbiórki pasażerów
+    final pendingPickups = route.stops
+        .where((s) => s.status == PickupStatus.pending)
+        .toList();
+
+    // Wszyscy pasażerowie są zebrani, gdy nie ma już żadnego ze statusem "Oczekuje" (są odebrani, odwołani lub noShow)
+    final bool allPickedUp = pendingPickups.isEmpty;
+
+    // Bieżący cel podróży (pasażer wieziony jako pierwszy):
+    // Pojawia się jako duży Hero Box DOPIERO gdy wszyscy pasażerowie zostaną odebrani!
     PassengerStop? currentTarget;
-    try {
-      if (isPLtoDE) {
-        // Sobota: cel to dowóz pierwszego pasażera do domu w Niemczech
+    if (allPickedUp) {
+      try {
         currentTarget = route.stops.firstWhere(
           (s) =>
               s.status != PickupStatus.delivered &&
               s.status != PickupStatus.cancelled &&
               s.status != PickupStatus.noShow,
         );
-      } else {
-        // Niedziela: najpierw zbiórka z domów w DE (pending), a po zbiórce dowóz do hotelu w PL
-        final pending = route.stops.where((s) => s.status == PickupStatus.pending).toList();
-        if (pending.isNotEmpty) {
-          currentTarget = pending.first;
-        } else {
-          currentTarget = route.stops.firstWhere(
-            (s) =>
-                s.status != PickupStatus.delivered &&
-                s.status != PickupStatus.cancelled &&
-                s.status != PickupStatus.noShow,
-          );
-        }
+      } catch (_) {
+        currentTarget = null;
       }
-    } catch (_) {
-      currentTarget = null;
     }
 
     // Pozostali oczekujący pasażerowie (bez tego, który jest na karcie głównego celu)
@@ -1633,7 +1628,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
           s.status != PickupStatus.noShow;
     }).toList();
 
-    // Pasażerowie już obsłużeni
+    // Pasażerowie już obsłużeni (dowiezieni / anulowani / noShow)
     final completedStops = route.stops.where((s) {
       if (s == currentTarget) return false;
       return s.status == PickupStatus.delivered ||
@@ -1674,8 +1669,15 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
           const SizedBox(height: 12),
         ],
 
-        // Wyróżniona karta Bieżącego Celu Podróży (Kto pierwszy do domu / hotelu)
-        _buildNextStopHeroCard(route, isPLtoDE, currentTarget),
+        // Wyróżniona karta Bieżącego Celu Podróży (Kto pierwszy do domu / hotelu) lub Status Zbiórki
+        _buildNextStopHeroCard(
+          route,
+          isPLtoDE,
+          currentTarget,
+          allPickedUp: allPickedUp,
+          pendingCount: pendingPickups.length,
+          totalCount: route.stops.length,
+        ),
         const SizedBox(height: 14),
 
         // Pozostali pasażerowie do obsłużenia
@@ -1686,9 +1688,13 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  isPLtoDE
-                      ? '👥 Pozostali do dowiezienia (${otherPendingStops.length})'
-                      : '👥 Pozostali do obsłużenia (${otherPendingStops.length})',
+                  !allPickedUp
+                      ? (isPLtoDE
+                          ? '📋 Pasażerowie do odebrania z hoteli (${otherPendingStops.length})'
+                          : '📋 Pasażerowie do odebrania z domów (${otherPendingStops.length})')
+                      : (isPLtoDE
+                          ? '👥 Pozostali do dowiezienia (${otherPendingStops.length})'
+                          : '👥 Pozostali do obsłużenia (${otherPendingStops.length})'),
                   style: const TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.bold,
@@ -1753,7 +1759,86 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
     );
   }
 
-  Widget _buildNextStopHeroCard(BusRoute route, bool isPLtoDE, PassengerStop? currentTarget) {
+  Widget _buildNextStopHeroCard(
+    BusRoute route,
+    bool isPLtoDE,
+    PassengerStop? currentTarget, {
+    required bool allPickedUp,
+    required int pendingCount,
+    required int totalCount,
+  }) {
+    // Jeśli trwa jeszcze etap zbiórki pasażerów z hoteli/domów
+    if (!allPickedUp) {
+      final pickedCount = totalCount - pendingCount;
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: _convexDecoration(
+          borderRadius: BorderRadius.circular(16),
+          baseTopColor: _isDark
+              ? AppColors.activeTheme.boxStart.withValues(alpha: 0.9)
+              : Colors.orange.shade50,
+          baseBottomColor: _isDark
+              ? AppColors.activeTheme.boxEnd.withValues(alpha: 0.9)
+              : Colors.white,
+          borderColor: AppColors.brandingOrange.withValues(alpha: 0.6),
+          borderWidth: 1.2,
+          isHighlighted: true,
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(9),
+              decoration: BoxDecoration(
+                color: AppColors.brandingOrange.withValues(alpha: 0.18),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.people_alt_rounded,
+                color: AppColors.brandingOrange,
+                size: 22,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    isPLtoDE
+                        ? 'ETAP ZBIÓRKI Z HOTELI'
+                        : 'ETAP ZBIÓRKI Z DOMÓW (NIEMCY)',
+                    style: const TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 0.8,
+                      color: AppColors.brandingOrange,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Odebrano: $pickedCount z $totalCount pasażerów',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Po odebraniu wszystkich pojawi się cel podróży do dowiezienia.',
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.7),
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     if (currentTarget == null) {
       return Container(
         padding: const EdgeInsets.all(16),
@@ -2056,14 +2141,6 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                                 color: AppColors.gray,
                               ),
                             ),
-                            if (currentTarget.driveTime != null || currentTarget.distance != null)
-                              Text(
-                                '${currentTarget.driveTime ?? ''}${currentTarget.distance != null ? " • ${currentTarget.distance}" : ""}',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.white.withValues(alpha: 0.65),
-                                ),
-                              ),
                           ],
                         ),
                       ),
@@ -2206,14 +2283,6 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                                 color: Colors.white,
                               ),
                             ),
-                            if (currentTarget.driveTime != null || currentTarget.distance != null)
-                              Text(
-                                '${currentTarget.driveTime ?? ''}${currentTarget.distance != null ? " • ${currentTarget.distance}" : ""}',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.white.withValues(alpha: 0.65),
-                                ),
-                              ),
                           ],
                         ),
                       ),
@@ -3445,48 +3514,62 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
   }
 
   Widget _buildTransferPointCard(TransferPoint point) {
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 4),
-      decoration: _convexDecoration(
-        borderRadius: BorderRadius.circular(12),
-        baseTopColor: point.isCompleted
-            ? (_isDark ? AppColors.activeTheme.boxStart.withValues(alpha: 0.6) : Colors.grey.shade100)
-            : null,
-        baseBottomColor: point.isCompleted
-            ? (_isDark ? AppColors.activeTheme.boxStart.withValues(alpha: 0.3) : Colors.grey.shade50)
-            : null,
-        borderColor: point.isCompleted ? _borderColor : AppColors.activeTheme.border,
-        borderWidth: point.isCompleted ? 1.0 : 1.5,
-      ),
-      child: Material(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(12),
-        child: CheckboxListTile(
-          activeColor: AppColors.brandingOrange,
-          value: point.isCompleted,
-          onChanged: (_) => _toggleTransferPoint(point),
-          dense: true,
-          controlAffinity: ListTileControlAffinity.leading,
-          title: Text(
-            '${point.time} • ${point.location}',
-            style: TextStyle(
-              fontWeight: FontWeight.bold,
-              fontSize: 13,
-              color: _textPrimary,
-              decoration: point.isCompleted ? TextDecoration.lineThrough : null,
+    final isDone = point.isCompleted;
+    return AnimatedOpacity(
+      duration: const Duration(milliseconds: 250),
+      opacity: isDone ? 0.45 : 1.0,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        decoration: _convexDecoration(
+          borderRadius: BorderRadius.circular(12),
+          baseTopColor: isDone
+              ? (_isDark ? const Color(0xFF141414) : Colors.grey.shade200)
+              : null,
+          baseBottomColor: isDone
+              ? (_isDark ? const Color(0xFF0F0F0F) : Colors.grey.shade100)
+              : null,
+          borderColor: isDone
+              ? (_isDark ? Colors.white.withValues(alpha: 0.10) : Colors.grey.shade400)
+              : AppColors.activeTheme.border,
+          borderWidth: isDone ? 1.0 : 1.5,
+        ),
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+          child: CheckboxListTile(
+            activeColor: isDone ? AppColors.gray : AppColors.brandingOrange,
+            checkColor: Colors.white,
+            value: isDone,
+            onChanged: (_) => _toggleTransferPoint(point),
+            dense: true,
+            controlAffinity: ListTileControlAffinity.leading,
+            title: Text(
+              '${point.time} • ${point.location}',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 13,
+                color: isDone ? AppColors.gray : _textPrimary,
+                decoration: isDone ? TextDecoration.lineThrough : null,
+              ),
             ),
-          ),
-          subtitle: Text(
-            point.instruction,
-            style: TextStyle(
-              fontSize: 12,
-              color: point.isCompleted ? AppColors.gray : _textSecondary,
+            subtitle: Text(
+              point.instruction,
+              style: TextStyle(
+                fontSize: 12,
+                color: isDone
+                    ? AppColors.gray.withValues(alpha: 0.75)
+                    : _textSecondary,
+              ),
             ),
-          ),
-          secondary: IconButton(
-            icon: const Icon(Icons.near_me, color: AppColors.brandingOrange, size: 20),
-            tooltip: 'Nawiguj do punktu',
-            onPressed: () => LauncherService.openNavigation(context, point.location),
+            secondary: IconButton(
+              icon: Icon(
+                Icons.near_me,
+                color: isDone ? AppColors.gray : AppColors.brandingOrange,
+                size: 20,
+              ),
+              tooltip: 'Nawiguj do punktu',
+              onPressed: () => LauncherService.openNavigation(context, point.location),
+            ),
           ),
         ),
       ),
@@ -3637,33 +3720,96 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                           ],
                         ),
                         if (stop.hotelTime != null || stop.homeTime != null) ...[
-                          const SizedBox(height: 3),
-                          Row(
-                            children: [
-                              Icon(
-                                Icons.access_time_rounded,
-                                size: 11,
-                                color: isDelivered
-                                    ? (_isDark ? Colors.white38 : Colors.grey.shade500)
-                                    : AppColors.brandingOrange,
+                          const SizedBox(height: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: _isDark
+                                  ? Colors.black.withValues(alpha: 0.25)
+                                  : Colors.black.withValues(alpha: 0.04),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: _isDark
+                                    ? Colors.white.withValues(alpha: 0.08)
+                                    : Colors.black.withValues(alpha: 0.06),
                               ),
-                              const SizedBox(width: 4),
-                              Expanded(
-                                child: Text(
-                                  isPLtoDE
-                                      ? 'Hotel ${stop.hotelTime ?? "--:--"} ➔ Dom ${stop.homeTimeDisplay}'
-                                      : 'Dom ${stop.homeTimeDisplay} ➔ Hotel ${stop.hotelTime ?? "--:--"}${stop.resort.isNotEmpty ? " (${stop.resort})" : ""}',
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600,
-                                    color: isDelivered
-                                        ? (_isDark ? Colors.white38 : Colors.grey.shade600)
-                                        : _textPrimary,
+                            ),
+                            child: Row(
+                              children: [
+                                // Godzina 1: Odbiór
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      isPLtoDE ? Icons.hotel_rounded : Icons.home_rounded,
+                                      size: 14,
+                                      color: isDelivered ? AppColors.gray : AppColors.brandingOrange,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      isPLtoDE ? 'HOTEL ' : 'DOM ',
+                                      style: TextStyle(
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.bold,
+                                        letterSpacing: 0.5,
+                                        color: isDelivered ? AppColors.gray : AppColors.gray,
+                                      ),
+                                    ),
+                                    Text(
+                                      (isPLtoDE ? stop.hotelTime : stop.homeTimeDisplay) ?? '--:--',
+                                      style: TextStyle(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w900,
+                                        color: isDelivered
+                                            ? (_isDark ? Colors.white54 : Colors.grey.shade600)
+                                            : _textPrimary,
+                                        letterSpacing: 0.5,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const Padding(
+                                  padding: EdgeInsets.symmetric(horizontal: 6),
+                                  child: Icon(
+                                    Icons.arrow_forward_rounded,
+                                    size: 13,
+                                    color: AppColors.gray,
                                   ),
                                 ),
-                              ),
-                            ],
+                                // Godzina 2: Dojazd
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      isPLtoDE ? Icons.home_rounded : Icons.hotel_rounded,
+                                      size: 14,
+                                      color: isDelivered ? AppColors.gray : const Color(0xFF27AE60),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      isPLtoDE ? 'DOM ' : 'HOTEL ',
+                                      style: const TextStyle(
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.bold,
+                                        letterSpacing: 0.5,
+                                        color: AppColors.gray,
+                                      ),
+                                    ),
+                                    Text(
+                                      (isPLtoDE ? stop.homeTimeDisplay : stop.hotelTime) ?? '--:--',
+                                      style: TextStyle(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w900,
+                                        color: isDelivered
+                                            ? (_isDark ? Colors.white54 : Colors.grey.shade600)
+                                            : (isPLtoDE ? const Color(0xFF27AE60) : _textPrimary),
+                                        letterSpacing: 0.5,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
                           ),
                         ],
                       ],
@@ -3883,11 +4029,8 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                   ),
                 ],
 
-                // Harmonogram godzin i szacowany czas
-                if (stop.hotelTime != null ||
-                    stop.homeTime != null ||
-                    stop.driveTime != null ||
-                    stop.distance != null) ...[
+                // Harmonogram godzin (odjazd i dojazd)
+                if (stop.hotelTime != null || stop.homeTime != null) ...[
                   const SizedBox(height: 10),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -3898,119 +4041,82 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(color: _borderColor.withValues(alpha: 0.6)),
                     ),
-                    child: Column(
+                    child: Row(
                       children: [
-                        if (stop.hotelTime != null || stop.homeTime != null)
-                          Row(
+                        Expanded(
+                          child: Row(
                             children: [
-                              Expanded(
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      isPLtoDE ? Icons.hotel_rounded : Icons.home_rounded,
-                                      size: 15,
-                                      color: AppColors.brandingOrange,
-                                    ),
-                                    const SizedBox(width: 6),
-                                    Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          isPLtoDE ? 'ODJAZD Z HOTELU' : 'ODBIÓR Z DOMU',
-                                          style: const TextStyle(
-                                            fontSize: 9,
-                                            fontWeight: FontWeight.bold,
-                                            color: AppColors.gray,
-                                          ),
-                                        ),
-                                        Text(
-                                          (isPLtoDE ? stop.hotelTime : stop.homeTimeDisplay) ?? '--:--',
-                                          style: TextStyle(
-                                            fontSize: 13,
-                                            fontWeight: FontWeight.bold,
-                                            color: _textPrimary,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ],
-                                ),
-                              ),
                               Icon(
-                                Icons.arrow_forward_rounded,
-                                size: 16,
-                                color: AppColors.gray.withValues(alpha: 0.6),
+                                isPLtoDE ? Icons.hotel_rounded : Icons.home_rounded,
+                                size: 15,
+                                color: AppColors.brandingOrange,
                               ),
-                              Expanded(
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.end,
-                                  children: [
-                                    Column(
-                                      crossAxisAlignment: CrossAxisAlignment.end,
-                                      children: [
-                                        Text(
-                                          isPLtoDE ? 'DOJAZD DO DOMU' : 'DOJAZD DO HOTELU',
-                                          style: const TextStyle(
-                                            fontSize: 9,
-                                            fontWeight: FontWeight.bold,
-                                            color: AppColors.gray,
-                                          ),
-                                        ),
-                                        Text(
-                                          (isPLtoDE ? stop.homeTimeDisplay : stop.hotelTime) ?? '--:--',
-                                          style: TextStyle(
-                                            fontSize: 13,
-                                            fontWeight: FontWeight.bold,
-                                            color: _textPrimary,
-                                          ),
-                                        ),
-                                      ],
+                              const SizedBox(width: 6),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    isPLtoDE ? 'ODJAZD Z HOTELU' : 'ODBIÓR Z DOMU',
+                                    style: const TextStyle(
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.bold,
+                                      color: AppColors.gray,
                                     ),
-                                    const SizedBox(width: 6),
-                                    Icon(
-                                      isPLtoDE ? Icons.home_rounded : Icons.hotel_rounded,
-                                      size: 15,
-                                      color: const Color(0xFF27AE60),
+                                  ),
+                                  Text(
+                                    (isPLtoDE ? stop.hotelTime : stop.homeTimeDisplay) ?? '--:--',
+                                    style: TextStyle(
+                                      fontSize: 17,
+                                      fontWeight: FontWeight.w900,
+                                      color: _textPrimary,
+                                      letterSpacing: 0.5,
                                     ),
-                                  ],
-                                ),
+                                  ),
+                                ],
                               ),
                             ],
                           ),
-                        if (stop.driveTime != null || stop.distance != null) ...[
-                          if (stop.hotelTime != null || stop.homeTime != null) ...[
-                            const SizedBox(height: 6),
-                            Divider(height: 1, color: _borderColor.withValues(alpha: 0.5)),
-                            const SizedBox(height: 6),
-                          ],
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        ),
+                        Icon(
+                          Icons.arrow_forward_rounded,
+                          size: 18,
+                          color: AppColors.gray.withValues(alpha: 0.6),
+                        ),
+                        Expanded(
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.end,
                             children: [
-                              if (stop.driveTime != null)
-                                Row(
-                                  children: [
-                                    const Icon(Icons.timer_outlined, size: 12, color: AppColors.gray),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      'Czas jazdy: ${stop.driveTime}',
-                                      style: const TextStyle(fontSize: 11, color: AppColors.gray),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  Text(
+                                    isPLtoDE ? 'DOJAZD DO DOMU' : 'DOJAZD DO HOTELU',
+                                    style: const TextStyle(
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.bold,
+                                      color: AppColors.gray,
                                     ),
-                                  ],
-                                ),
-                              if (stop.distance != null)
-                                Row(
-                                  children: [
-                                    const Icon(Icons.straighten, size: 12, color: AppColors.gray),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      stop.distance!,
-                                      style: const TextStyle(fontSize: 11, color: AppColors.gray),
+                                  ),
+                                  Text(
+                                    (isPLtoDE ? stop.homeTimeDisplay : stop.hotelTime) ?? '--:--',
+                                    style: TextStyle(
+                                      fontSize: 17,
+                                      fontWeight: FontWeight.w900,
+                                      color: isPLtoDE ? const Color(0xFF27AE60) : _textPrimary,
+                                      letterSpacing: 0.5,
                                     ),
-                                  ],
-                                ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(width: 6),
+                              Icon(
+                                isPLtoDE ? Icons.home_rounded : Icons.hotel_rounded,
+                                size: 15,
+                                color: const Color(0xFF27AE60),
+                              ),
                             ],
                           ),
-                        ],
+                        ),
                       ],
                     ),
                   ),
