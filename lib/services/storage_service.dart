@@ -216,12 +216,14 @@ class StorageService {
   }
 
   /// Czyści wszystkie dane bieżącego kursu (liczniki, tankowania, przerwy, statusy pasażerów, finanse)
-  /// z zachowaniem preferencji wyglądu (motyw kolorystyczny, tryb ciemny/jasny).
+  /// z zachowaniem preferencji wyglądu (motyw kolorystyczny, tryb ciemny/jasny) oraz stałej bazy hoteli.
   static Future<void> clearAllTripData() async {
     final prefs = await SharedPreferences.getInstance();
     final allKeys = prefs.getKeys().toList();
     for (final key in allKeys) {
-      if (key == _themeModeKey || key == _paletteThemeKey) {
+      if (key == _themeModeKey ||
+          key == _paletteThemeKey ||
+          key == 'balticbus_permanent_hotel_directory') {
         continue;
       }
       await prefs.remove(key);

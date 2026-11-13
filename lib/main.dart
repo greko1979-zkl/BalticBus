@@ -7,6 +7,7 @@ import 'data/sample_routes.dart';
 import 'models/route_models.dart';
 import 'services/docx_report_service.dart';
 import 'services/excel_parser_service.dart';
+import 'services/hotel_directory_service.dart';
 import 'services/launcher_service.dart';
 import 'services/report_service.dart';
 import 'services/storage_service.dart';
@@ -32,6 +33,8 @@ void main() async {
     (s) => s.name == savedPalette,
     orElse: () => AppThemeStyle.balticNoir,
   );
+
+  await HotelDirectoryService.loadAll();
 
   final initialHasActiveTrip = await StorageService.hasActiveTrip();
   runApp(BalticBusApp(initialHasActiveTrip: initialHasActiveTrip));
@@ -230,6 +233,9 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
   String _selectedDate = '2026-08-01'; // Sobota wywóz lub Niedziela przywóz
   bool _isLoading = false;
   int _currentTabIndex = 0;
+  String? _selectedHotelCity;
+  final TextEditingController _hotelSearchController = TextEditingController();
+  String _hotelSearchQuery = '';
   bool _showCompletedPassengers = false;
   double _advanceEur = 0.0;
   double _advancePln = 0.0;
@@ -1360,12 +1366,23 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('Anuluj'),
+              child: const Text('Anuluj', style: TextStyle(color: Colors.grey)),
             ),
-            FilledButton(
+            FilledButton.icon(
               style: FilledButton.styleFrom(
-                backgroundColor: AppColors.brandingOrange,
+                backgroundColor: _isDark ? const Color(0xFF5A391E) : const Color(0xFFE67300),
+                foregroundColor: _isDark ? const Color(0xFFFFF1E3) : Colors.white,
+                side: BorderSide(
+                  color: _isDark ? const Color(0xFFD48B47) : const Color(0xFFB35900),
+                  width: 1.2,
+                ),
               ),
+              icon: Icon(
+                Icons.save_rounded,
+                size: 17,
+                color: _isDark ? const Color(0xFFFFD4A8) : Colors.white,
+              ),
+              label: const Text('Zapisz tankowanie', style: TextStyle(fontWeight: FontWeight.bold)),
               onPressed: () {
                 final odo = int.tryParse(odoController.text.trim()) ?? 0;
                 final liters = double.tryParse(litersController.text.replaceAll(',', '.').trim()) ?? 0.0;
@@ -1406,7 +1423,6 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                   fuelType == 'AdBlue' ? Icons.water_drop : Icons.local_gas_station,
                 );
               },
-              child: const Text('Zapisz'),
             ),
           ],
         ),
@@ -1515,6 +1531,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                   _buildRouteTab(route, isPLtoDE),
                   _buildVehicleAndFuelTab(route, isPLtoDE),
                   _buildReportsAndWorkTimeTab(route, isPLtoDE),
+                  _buildHotelsDirectoryTab(),
                 ],
               ),
         bottomNavigationBar: _buildBottomNavigationBar(route),
@@ -1587,6 +1604,11 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                 child: const Icon(Icons.assignment),
               ),
               label: 'Raporty & Czas',
+            ),
+            const BottomNavigationBarItem(
+              icon: Icon(Icons.hotel_outlined),
+              activeIcon: Icon(Icons.hotel),
+              label: 'Hotele',
             ),
           ],
         ),
@@ -1948,10 +1970,25 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                 constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
                 icon: const Icon(Icons.navigation, size: 20, color: AppColors.brandingOrange),
                 tooltip: 'Nawiguj do celu',
-                onPressed: () => LauncherService.openNavigation(
-                  context,
-                  currentTarget.address,
-                ),
+                onPressed: () {
+                  if (!isPLtoDE && currentTarget.resort.isNotEmpty) {
+                    final h = HotelDirectoryService.getCachedHotel(currentTarget.resort);
+                    if (h != null && h.fullAddress.isNotEmpty) {
+                      LauncherService.openNavigation(context, h.fullAddress);
+                    } else {
+                      _showNotice(
+                        'Brak adresu hotelu ${currentTarget.resort}. Uzupełnij w zakładce Hotele.',
+                        Icons.info_outline,
+                        Colors.amber,
+                      );
+                    }
+                  } else {
+                    LauncherService.openNavigation(
+                      context,
+                      currentTarget.address,
+                    );
+                  }
+                },
               ),
               const SizedBox(width: 6),
               FilledButton(
@@ -2027,6 +2064,24 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                                 color: Colors.white,
                               ),
                             ),
+                            if (currentTarget.resort.isNotEmpty) ...[
+                              Builder(
+                                builder: (context) {
+                                  final h = HotelDirectoryService.getCachedHotel(currentTarget.resort);
+                                  final addr = h != null && h.fullAddress.isNotEmpty
+                                      ? h.fullAddress
+                                      : '(brak zapisanego adresu)';
+                                  return Text(
+                                    addr,
+                                    style: TextStyle(
+                                      fontSize: 11.5,
+                                      color: Colors.white.withValues(alpha: 0.75),
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  );
+                                },
+                              ),
+                            ],
                           ],
                         ),
                       ),
@@ -2283,6 +2338,24 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                                 color: Colors.white,
                               ),
                             ),
+                            if (currentTarget.resort.isNotEmpty) ...[
+                              Builder(
+                                builder: (context) {
+                                  final h = HotelDirectoryService.getCachedHotel(currentTarget.resort);
+                                  final addr = h != null && h.fullAddress.isNotEmpty
+                                      ? h.fullAddress
+                                      : '(brak zapisanego adresu)';
+                                  return Text(
+                                    addr,
+                                    style: TextStyle(
+                                      fontSize: 11.5,
+                                      color: Colors.white.withValues(alpha: 0.75),
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  );
+                                },
+                              ),
+                            ],
                           ],
                         ),
                       ),
@@ -2388,13 +2461,21 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
               ),
               FilledButton.icon(
                 style: FilledButton.styleFrom(
-                  backgroundColor: _isDark ? AppColors.activeTheme.primaryAccent : AppColors.brandingOrange,
-                  foregroundColor: _isDark ? AppColors.activeTheme.secondaryAccent : Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  backgroundColor: _isDark ? const Color(0xFF5A391E) : const Color(0xFFE67300),
+                  foregroundColor: _isDark ? const Color(0xFFFFF1E3) : Colors.white,
+                  side: BorderSide(
+                    color: _isDark ? const Color(0xFFD48B47) : const Color(0xFFB35900),
+                    width: 1.2,
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
                   visualDensity: VisualDensity.compact,
                 ),
-                icon: const Icon(Icons.add, size: 16),
-                label: const Text('Dodaj tankowanie', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                icon: Icon(
+                  Icons.add_rounded,
+                  size: 17,
+                  color: _isDark ? const Color(0xFFFFD4A8) : Colors.white,
+                ),
+                label: const Text('Dodaj tankowanie', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                 onPressed: _showAddRefuelingDialog,
               ),
             ],
@@ -2893,6 +2974,580 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                 ),
               ),
               const Icon(Icons.arrow_forward_ios, size: 12, color: Colors.white54),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // TAB 3: BAZA HOTELI I OŚRODKÓW
+  Widget _buildHotelsDirectoryTab() {
+    final grouped = HotelDirectoryService.getHotelsGroupedByCitySync();
+    final allHotels = HotelDirectoryService.getAllHotelsSync().values.toList()
+      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+
+    final query = _hotelSearchQuery.trim().toLowerCase();
+    final isSearching = query.isNotEmpty;
+    final searchResults = isSearching
+        ? allHotels.where((h) {
+            return h.name.toLowerCase().contains(query) ||
+                h.address.toLowerCase().contains(query) ||
+                h.city.toLowerCase().contains(query) ||
+                (h.note != null && h.note!.toLowerCase().contains(query));
+          }).toList()
+        : <HotelInfo>[];
+
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      floatingActionButton: FloatingActionButton.extended(
+        backgroundColor: _isDark ? const Color(0xFF5A391E) : const Color(0xFFE67300),
+        foregroundColor: _isDark ? const Color(0xFFFFF1E3) : Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(
+            color: _isDark ? const Color(0xFFD48B47) : const Color(0xFFB35900),
+            width: 1.2,
+          ),
+        ),
+        icon: Icon(
+          Icons.add_business_rounded,
+          color: _isDark ? const Color(0xFFFFD4A8) : Colors.white,
+        ),
+        label: const Text('Dodaj hotel', style: TextStyle(fontWeight: FontWeight.bold)),
+        onPressed: () => _showEditHotelDialog(defaultCity: _selectedHotelCity),
+      ),
+      body: SafeArea(
+        child: Column(
+          children: [
+            // Nagłówek zakładki
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                decoration: _convexDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  borderWidth: 1.1,
+                  isHighlighted: false,
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(9),
+                      decoration: BoxDecoration(
+                        color: _isDark
+                            ? Colors.white.withValues(alpha: 0.08)
+                            : Colors.black.withValues(alpha: 0.05),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        Icons.hotel_rounded,
+                        color: _isDark ? AppColors.activeTheme.secondaryAccent : _textPrimary,
+                        size: 22,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'KATALOG HOTELI I SANATORIÓW',
+                        style: TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 0.8,
+                          color: _textPrimary,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            // Wyszukiwarka
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: _isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.03),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: _borderColor),
+                ),
+                child: TextField(
+                  controller: _hotelSearchController,
+                  onChanged: (val) => setState(() => _hotelSearchQuery = val),
+                  style: TextStyle(color: _textPrimary, fontSize: 13.5),
+                  textAlignVertical: TextAlignVertical.center,
+                  decoration: InputDecoration(
+                    isDense: true,
+                    hintText: 'Szukaj po nazwie, ulicy lub mieście...',
+                    hintStyle: TextStyle(color: _textSecondary.withValues(alpha: 0.7), fontSize: 13),
+                    prefixIcon: const Icon(Icons.search, size: 20, color: AppColors.gray),
+                    suffixIcon: _hotelSearchQuery.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear, size: 18),
+                            onPressed: () {
+                              _hotelSearchController.clear();
+                              setState(() => _hotelSearchQuery = '');
+                            },
+                          )
+                        : null,
+                    border: InputBorder.none,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  ),
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 4),
+
+            // Pasek wyboru miast (poziome chipy)
+            if (!isSearching)
+              SizedBox(
+                height: 40,
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  children: [
+                    ChoiceChip(
+                      label: Text('Wszystkie (${allHotels.length})', style: const TextStyle(fontSize: 11.5)),
+                      selected: _selectedHotelCity == null,
+                      selectedColor: _isDark ? AppColors.activeTheme.primaryAccent : AppColors.brandingOrange.withValues(alpha: 0.18),
+                      labelStyle: TextStyle(
+                        color: _selectedHotelCity == null
+                            ? (_isDark ? AppColors.activeTheme.secondaryAccent : AppColors.brandingOrange)
+                            : _textSecondary,
+                        fontWeight: _selectedHotelCity == null ? FontWeight.bold : FontWeight.normal,
+                      ),
+                      side: BorderSide(
+                        color: _selectedHotelCity == null
+                            ? (_isDark ? AppColors.activeTheme.secondaryAccent.withValues(alpha: 0.6) : AppColors.brandingOrange)
+                            : _borderColor.withValues(alpha: 0.4),
+                      ),
+                      backgroundColor: _isDark ? Colors.white.withValues(alpha: 0.04) : Colors.black.withValues(alpha: 0.03),
+                      visualDensity: VisualDensity.compact,
+                      onSelected: (_) => setState(() => _selectedHotelCity = null),
+                    ),
+                    const SizedBox(width: 6),
+                    ...grouped.entries.map((entry) {
+                      final isSelected = _selectedHotelCity == entry.key;
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: ChoiceChip(
+                          label: Text('${entry.key} (${entry.value.length})', style: const TextStyle(fontSize: 11.5)),
+                          selected: isSelected,
+                          selectedColor: _isDark ? AppColors.activeTheme.primaryAccent : AppColors.brandingOrange.withValues(alpha: 0.18),
+                          labelStyle: TextStyle(
+                            color: isSelected
+                                ? (_isDark ? AppColors.activeTheme.secondaryAccent : AppColors.brandingOrange)
+                                : _textSecondary,
+                            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                          ),
+                          side: BorderSide(
+                            color: isSelected
+                                ? (_isDark ? AppColors.activeTheme.secondaryAccent.withValues(alpha: 0.6) : AppColors.brandingOrange)
+                                : _borderColor.withValues(alpha: 0.4),
+                          ),
+                          backgroundColor: _isDark ? Colors.white.withValues(alpha: 0.04) : Colors.black.withValues(alpha: 0.03),
+                          visualDensity: VisualDensity.compact,
+                          onSelected: (_) => setState(() => _selectedHotelCity = isSelected ? null : entry.key),
+                        ),
+                      );
+                    }),
+                  ],
+                ),
+              ),
+
+            const SizedBox(height: 6),
+
+            // Główna lista (Widok Miast LUB Lista Hoteli w danym Mieście LUB Wyniki Szukania)
+            Expanded(
+              child: isSearching
+                  ? _buildHotelSearchResults(searchResults)
+                  : (_selectedHotelCity == null
+                      ? _buildCitiesOverviewList(grouped)
+                      : _buildCityHotelsList(_selectedHotelCity!, grouped[_selectedHotelCity] ?? [])),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // WIDOK 1: LISTA MIAST (PODZIAŁ NA MIEJSCOWOŚCI)
+  Widget _buildCitiesOverviewList(Map<String, List<HotelInfo>> grouped) {
+    final entries = grouped.entries.toList();
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 80),
+      itemCount: entries.length,
+      itemBuilder: (context, index) {
+        final city = entries[index].key;
+        final hotels = entries[index].value;
+        final previewHotels = hotels.take(3).map((h) => h.name).join(', ');
+        final moreCount = hotels.length > 3 ? ' +${hotels.length - 3}' : '';
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 10),
+          decoration: _convexDecoration(
+            borderRadius: BorderRadius.circular(14),
+            borderColor: _borderColor,
+            borderWidth: 1.1,
+            isHighlighted: false,
+          ),
+          child: Material(
+            color: Colors.transparent,
+            borderRadius: BorderRadius.circular(14),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(14),
+              onTap: () => setState(() => _selectedHotelCity = city),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: _isDark
+                            ? Colors.white.withValues(alpha: 0.06)
+                            : Colors.black.withValues(alpha: 0.04),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Icon(
+                        Icons.location_city_rounded,
+                        color: _isDark ? AppColors.activeTheme.secondaryAccent : _textSecondary,
+                        size: 24,
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Text(
+                                city,
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                  color: _textPrimary,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              _buildBrandBadge(
+                                '${hotels.length} ${hotels.length == 1 ? 'obiekt' : (hotels.length < 5 ? 'obiekty' : 'obiektów')}',
+                                _isDark ? AppColors.activeTheme.secondaryAccent : _textSecondary,
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '$previewHotels$moreCount',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: _textSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppColors.gray),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // WIDOK 2: HOTELE W WYBRANYM MIEŚCIE
+  Widget _buildCityHotelsList(String city, List<HotelInfo> hotels) {
+    return Column(
+      children: [
+        // Belka nawigacyjna z powrotem do miast
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          child: Row(
+            children: [
+              InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: () => setState(() => _selectedHotelCity = null),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.arrow_back_ios_rounded,
+                        size: 14,
+                        color: _isDark ? AppColors.activeTheme.secondaryAccent : _textPrimary,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Wszystkie miasta',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                          color: _isDark ? AppColors.activeTheme.secondaryAccent : _textPrimary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const Spacer(),
+              Text(
+                '$city (${hotels.length})',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                  color: _textPrimary,
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        Expanded(
+          child: hotels.isEmpty
+              ? Center(
+                  child: Text(
+                    'Brak hoteli w miejscowości $city',
+                    style: TextStyle(color: _textSecondary),
+                  ),
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 80),
+                  itemCount: hotels.length,
+                  itemBuilder: (context, index) => _buildHotelCard(hotels[index]),
+                ),
+        ),
+      ],
+    );
+  }
+
+  // WIDOK 3: WYNIKI WYSZUKIWANIA
+  Widget _buildHotelSearchResults(List<HotelInfo> results) {
+    if (results.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.search_off_rounded, size: 40, color: AppColors.gray),
+            const SizedBox(height: 8),
+            Text(
+              'Nie znaleziono hoteli pasujących do zapytania',
+              style: TextStyle(color: _textSecondary, fontSize: 13),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 80),
+      itemCount: results.length,
+      itemBuilder: (context, index) => _buildHotelCard(results[index]),
+    );
+  }
+
+  // KARTA POJEDYNCZEGO HOTELU
+  Widget _buildHotelCard(HotelInfo hotel) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: _convexDecoration(
+        borderRadius: BorderRadius.circular(14),
+        borderColor: _borderColor,
+        borderWidth: 1.1,
+        isHighlighted: false,
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(14),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  CircleAvatar(
+                    radius: 16,
+                    backgroundColor: _isDark
+                        ? Colors.white.withValues(alpha: 0.08)
+                        : Colors.black.withValues(alpha: 0.05),
+                    child: Icon(
+                      Icons.hotel_rounded,
+                      size: 18,
+                      color: _isDark ? AppColors.activeTheme.secondaryAccent : _textSecondary,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          hotel.name,
+                          style: TextStyle(
+                            fontSize: 15.5,
+                            fontWeight: FontWeight.bold,
+                            color: _textPrimary,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Wrap(
+                          spacing: 6,
+                          children: [
+                            _buildBrandBadge(
+                              hotel.city,
+                              _isDark ? AppColors.activeTheme.secondaryAccent : _textSecondary,
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  PopupMenuButton<String>(
+                    tooltip: 'Opcje hotelu',
+                    icon: const Icon(Icons.more_vert, size: 20, color: AppColors.gray),
+                    onSelected: (val) {
+                      if (val == 'edit') {
+                        _showEditHotelDialog(hotel: hotel);
+                      } else if (val == 'delete') {
+                        _confirmDeleteHotel(hotel);
+                      }
+                    },
+                    itemBuilder: (context) => [
+                      const PopupMenuItem(
+                        value: 'edit',
+                        child: Row(
+                          children: [
+                            Icon(Icons.edit_outlined, size: 18),
+                            SizedBox(width: 8),
+                            Text('Edytuj dane'),
+                          ],
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: 'delete',
+                        child: Row(
+                          children: [
+                            Icon(Icons.delete_outline, size: 18, color: Colors.redAccent),
+                            SizedBox(width: 8),
+                            Text('Usuń z bazy', style: TextStyle(color: Colors.redAccent)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+
+              // Adres
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.location_on_outlined, size: 16, color: AppColors.gray),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      hotel.fullAddress,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: _textSecondary,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+
+              // Wskazówka / Uwagi
+              if (hotel.note != null && hotel.note!.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: _isDark ? Colors.white.withValues(alpha: 0.04) : Colors.black.withValues(alpha: 0.03),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: _borderColor.withValues(alpha: 0.5)),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.info_outline,
+                        size: 13,
+                        color: _isDark ? AppColors.activeTheme.secondaryAccent : _textSecondary,
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          hotel.note!,
+                          style: TextStyle(fontSize: 11.5, color: _textSecondary),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+
+              const SizedBox(height: 10),
+
+              // Przyciski akcji: Nawiguj w Google Maps + Edytuj
+              Row(
+                children: [
+                  Expanded(
+                    child: FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: _isDark ? const Color(0xFF5A391E) : const Color(0xFFE67300),
+                        foregroundColor: _isDark ? const Color(0xFFFFF1E3) : Colors.white,
+                        side: BorderSide(
+                          color: _isDark ? const Color(0xFFD48B47) : const Color(0xFFB35900),
+                          width: 1.2,
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      onPressed: () => LauncherService.openNavigation(context, hotel.fullAddress),
+                      icon: Icon(
+                        Icons.near_me_rounded,
+                        size: 16,
+                        color: _isDark ? const Color(0xFFFFD4A8) : Colors.white,
+                      ),
+                      label: const Text(
+                        'Nawiguj (Google Maps)',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: _isDark ? const Color(0xFFDCD6CE) : _textPrimary,
+                      backgroundColor: _isDark ? const Color(0xFF262422) : Colors.black.withValues(alpha: 0.03),
+                      side: BorderSide(
+                        color: _isDark ? const Color(0xFF6B6258) : _borderColor,
+                        width: 1.1,
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    onPressed: () => _showEditHotelDialog(hotel: hotel),
+                    icon: Icon(
+                      Icons.edit_outlined,
+                      size: 16,
+                      color: _isDark ? const Color(0xFFFFD4A8) : _textSecondary,
+                    ),
+                    label: const Text('Edytuj', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                  ),
+                ],
+              ),
             ],
           ),
         ),
@@ -3578,6 +4233,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
 
   Widget _buildPassengerCard(PassengerStop stop, bool isPLtoDE) {
     final isDelivered = stop.status == PickupStatus.delivered;
+    final hotelInfo = stop.resort.isNotEmpty ? HotelDirectoryService.getCachedHotel(stop.resort) : null;
     Color statusColor;
     String statusText;
     IconData statusIcon;
@@ -3706,14 +4362,18 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                             ),
                             if (stop.resort.isNotEmpty) ...[
                               const SizedBox(width: 8),
-                              Text(
-                                '• ${stop.resort}',
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: isDelivered
-                                      ? (_isDark ? Colors.white38 : Colors.grey.shade600)
-                                      : AppColors.gray,
+                              Flexible(
+                                child: Text(
+                                  hotelInfo != null && hotelInfo.address.isNotEmpty
+                                      ? '• ${stop.resort} (${hotelInfo.address})'
+                                      : '• ${stop.resort}',
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: isDelivered
+                                        ? (_isDark ? Colors.white38 : Colors.grey.shade600)
+                                        : AppColors.gray,
+                                  ),
                                 ),
                               ),
                             ],
@@ -3974,12 +4634,12 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                 ),
                 Divider(height: 16, color: _borderColor),
 
-                // Adres
+                // Adres domowy
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Icon(
-                      stop.isTransfer ? Icons.sync_alt_rounded : Icons.location_on,
+                      stop.isTransfer ? Icons.sync_alt_rounded : Icons.home_rounded,
                       size: 16,
                       color: isDelivered
                           ? (_isDark ? Colors.white38 : Colors.grey)
@@ -3988,7 +4648,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
-                        stop.displayAddress,
+                        'Dom: ${stop.displayAddress}',
                         style: TextStyle(
                           fontSize: 13,
                           fontWeight: stop.isTransfer ? FontWeight.w600 : FontWeight.normal,
@@ -4000,6 +4660,69 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                     ),
                   ],
                 ),
+
+                // Adres hotelu (jeśli przypisany)
+                if (stop.resort.isNotEmpty) ...[
+                  const SizedBox(height: 5),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        Icons.hotel_rounded,
+                        size: 16,
+                        color: isDelivered
+                            ? (_isDark ? Colors.white38 : Colors.grey)
+                            : (_isDark ? AppColors.activeTheme.secondaryAccent : _textSecondary),
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 1),
+                          child: RichText(
+                            text: TextSpan(
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: isDelivered
+                                    ? (_isDark ? Colors.white54 : Colors.black45)
+                                    : _textSecondary,
+                              ),
+                              children: [
+                                TextSpan(
+                                  text: 'Hotel: ${stop.resort}',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: isDelivered
+                                        ? (_isDark ? Colors.white60 : Colors.black54)
+                                        : _textPrimary,
+                                  ),
+                                ),
+                                if (hotelInfo != null && hotelInfo.fullAddress.isNotEmpty) ...[
+                                  TextSpan(
+                                    text: ' • ${hotelInfo.fullAddress}',
+                                    style: TextStyle(
+                                      color: isDelivered
+                                          ? (_isDark ? Colors.white38 : Colors.grey)
+                                          : (_isDark ? Colors.white70 : Colors.black87),
+                                    ),
+                                  ),
+                                ] else ...[
+                                  const TextSpan(
+                                    text: ' • (brak adresu w bazie)',
+                                    style: TextStyle(
+                                      color: AppColors.gray,
+                                      fontStyle: FontStyle.italic,
+                                      fontSize: 11.5,
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
 
                 // Zarejestrowane czasy jeśli istnieją
                 if (stop.pickedUpAt != null || stop.deliveredAt != null) ...[
@@ -4124,58 +4847,218 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
 
                 const SizedBox(height: 10),
 
-                // Przyciski akcji: Telefon i Nawigacja
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: _textSecondary,
-                          side: BorderSide(color: _borderColor),
-                          padding: const EdgeInsets.symmetric(vertical: 8),
-                          visualDensity: VisualDensity.compact,
-                        ),
-                        onPressed: stop.phone.isNotEmpty
-                            ? () => LauncherService.openPhone(
-                                  context,
-                                  stop.phone,
-                                  stop.name,
-                                )
-                            : null,
-                        icon: const Icon(Icons.phone, size: 16),
-                        label: Text(
-                          stop.phone.isNotEmpty ? stop.phone : 'Brak tel.',
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 12),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: FilledButton.icon(
-                        style: FilledButton.styleFrom(
-                          backgroundColor: isDelivered
-                              ? (_isDark ? const Color(0xFF2C2C2C) : Colors.grey)
-                              : AppColors.brandingOrange,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 8),
-                          visualDensity: VisualDensity.compact,
-                        ),
-                        onPressed: (stop.address.isNotEmpty && !stop.isTransfer)
-                            ? () => LauncherService.openNavigation(
-                                  context,
-                                  stop.address,
-                                )
-                            : null,
-                        icon: const Icon(Icons.near_me, size: 16),
-                        label: const Text(
-                          'Nawiguj',
-                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                // Przyciski akcji: Telefon i Nawigacja (Dom / Hotel)
+                if (stop.resort.isNotEmpty) ...[
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 3,
+                        child: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: _isDark ? const Color(0xFFDCD6CE) : _textPrimary,
+                            backgroundColor: _isDark ? const Color(0xFF262422) : Colors.black.withValues(alpha: 0.03),
+                            side: BorderSide(
+                              color: _isDark ? const Color(0xFF6B6258) : _borderColor,
+                              width: 1.1,
+                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          onPressed: stop.phone.isNotEmpty
+                              ? () => LauncherService.openPhone(
+                                    context,
+                                    stop.phone,
+                                    stop.name,
+                                  )
+                              : null,
+                          icon: Icon(
+                            Icons.phone,
+                            size: 15,
+                            color: _isDark ? const Color(0xFFFFD4A8) : AppColors.brandingOrange,
+                          ),
+                          label: Text(
+                            stop.phone.isNotEmpty ? stop.phone : 'Tel.',
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+                          ),
                         ),
                       ),
-                    ),
-                  ],
-                ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        flex: 4,
+                        child: Builder(
+                          builder: (context) {
+                            final isHomeActive = (!isPLtoDE && stop.status == PickupStatus.pending) ||
+                                (isPLtoDE && stop.status != PickupStatus.pending);
+
+                            // Aktywny cel trasy: ciepły bursztynowo-miedziany akcent z elegancką ramką
+                            // Cel alternatywny/drugi etap: szlachetny ciemny grafit/brąz z wyraźnym obrysem
+                            final activeBg = _isDark ? const Color(0xFF5A391E) : const Color(0xFFE67300);
+                            final activeFg = _isDark ? const Color(0xFFFFF1E3) : Colors.white;
+                            final activeBorder = _isDark ? const Color(0xFFD48B47) : const Color(0xFFB35900);
+
+                            final secondaryBg = _isDark ? const Color(0xFF272422) : Colors.white;
+                            final secondaryFg = _isDark ? const Color(0xFFE4DDD5) : _textPrimary;
+                            final secondaryBorder = _isDark ? const Color(0xFF5E544A) : _borderColor;
+
+                            return FilledButton.icon(
+                              style: FilledButton.styleFrom(
+                                backgroundColor: isDelivered
+                                    ? (_isDark ? const Color(0xFF1F1D1B) : Colors.grey.shade300)
+                                    : (isHomeActive ? activeBg : secondaryBg),
+                                foregroundColor: isDelivered
+                                    ? (_isDark ? Colors.white38 : Colors.grey)
+                                    : (isHomeActive ? activeFg : secondaryFg),
+                                side: BorderSide(
+                                  color: isDelivered
+                                      ? Colors.transparent
+                                      : (isHomeActive ? activeBorder : secondaryBorder),
+                                  width: 1.2,
+                                ),
+                                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                                visualDensity: VisualDensity.compact,
+                              ),
+                              onPressed: (stop.address.isNotEmpty && !stop.isTransfer)
+                                  ? () => LauncherService.openNavigation(
+                                        context,
+                                        stop.address,
+                                      )
+                                  : null,
+                              icon: Icon(
+                                Icons.home_rounded,
+                                size: 15,
+                                color: isDelivered
+                                    ? Colors.grey
+                                    : (isHomeActive
+                                        ? (_isDark ? const Color(0xFFFFD4A8) : Colors.white)
+                                        : (_isDark ? const Color(0xFFC8BFB5) : _textSecondary)),
+                              ),
+                              label: const Text(
+                                'Dom',
+                                style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        flex: 4,
+                        child: Builder(
+                          builder: (context) {
+                            final isHotelActive = (isPLtoDE && stop.status == PickupStatus.pending) ||
+                                (!isPLtoDE && stop.status != PickupStatus.pending);
+
+                            // Aktywny cel trasy: ciepły bursztynowo-miedziany akcent z elegancką ramką
+                            // Cel alternatywny/drugi etap: szlachetny ciemny grafit/brąz z wyraźnym obrysem
+                            final activeBg = _isDark ? const Color(0xFF5A391E) : const Color(0xFFE67300);
+                            final activeFg = _isDark ? const Color(0xFFFFF1E3) : Colors.white;
+                            final activeBorder = _isDark ? const Color(0xFFD48B47) : const Color(0xFFB35900);
+
+                            final secondaryBg = _isDark ? const Color(0xFF272422) : Colors.white;
+                            final secondaryFg = _isDark ? const Color(0xFFE4DDD5) : _textPrimary;
+                            final secondaryBorder = _isDark ? const Color(0xFF5E544A) : _borderColor;
+
+                            return FilledButton.icon(
+                              style: FilledButton.styleFrom(
+                                backgroundColor: isDelivered
+                                    ? (_isDark ? const Color(0xFF1F1D1B) : Colors.grey.shade300)
+                                    : (isHotelActive ? activeBg : secondaryBg),
+                                foregroundColor: isDelivered
+                                    ? (_isDark ? Colors.white38 : Colors.grey)
+                                    : (isHotelActive ? activeFg : secondaryFg),
+                                side: BorderSide(
+                                  color: isDelivered
+                                      ? Colors.transparent
+                                      : (isHotelActive ? activeBorder : secondaryBorder),
+                                  width: 1.2,
+                                ),
+                                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                                visualDensity: VisualDensity.compact,
+                              ),
+                              onPressed: () {
+                                if (hotelInfo != null && hotelInfo.fullAddress.isNotEmpty) {
+                                  LauncherService.openNavigation(context, hotelInfo.fullAddress);
+                                } else {
+                                  _showNotice(
+                                    'Brak adresu dla ${stop.resort}. Uzupełnij w zakładce Hotele.',
+                                    Icons.info_outline,
+                                    _isDark ? AppColors.activeTheme.secondaryAccent : AppColors.brandingOrange,
+                                  );
+                                }
+                              },
+                              icon: Icon(
+                                Icons.hotel_rounded,
+                                size: 15,
+                                color: isDelivered
+                                    ? Colors.grey
+                                    : (isHotelActive
+                                        ? (_isDark ? const Color(0xFFFFD4A8) : Colors.white)
+                                        : (_isDark ? const Color(0xFFC8BFB5) : _textSecondary)),
+                              ),
+                              label: const Text(
+                                'Hotel',
+                                style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ] else ...[
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: _textSecondary,
+                            side: BorderSide(color: _borderColor),
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          onPressed: stop.phone.isNotEmpty
+                              ? () => LauncherService.openPhone(
+                                    context,
+                                    stop.phone,
+                                    stop.name,
+                                  )
+                              : null,
+                          icon: const Icon(Icons.phone, size: 16),
+                          label: Text(
+                            stop.phone.isNotEmpty ? stop.phone : 'Brak tel.',
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: FilledButton.icon(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: isDelivered
+                                ? (_isDark ? const Color(0xFF2C2C2C) : Colors.grey)
+                                : AppColors.brandingOrange,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          onPressed: (stop.address.isNotEmpty && !stop.isTransfer)
+                              ? () => LauncherService.openNavigation(
+                                    context,
+                                    stop.address,
+                                  )
+                              : null,
+                          icon: const Icon(Icons.near_me, size: 16),
+                          label: const Text(
+                            'Nawiguj',
+                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ],
             ),
           ),
@@ -4213,6 +5096,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
 
   @override
   void dispose() {
+    _hotelSearchController.dispose();
     _currentNoticeOverlay?.remove();
     _currentNoticeOverlay = null;
     super.dispose();
@@ -4371,6 +5255,271 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
               onSaved();
             },
             child: const Text('Zapisz'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showEditHotelDialog({HotelInfo? hotel, String? defaultCity}) {
+    final isEditing = hotel != null;
+    final nameCtrl = TextEditingController(text: hotel?.name ?? '');
+    final addressCtrl = TextEditingController(text: hotel?.address ?? '');
+    final cityCtrl = TextEditingController(
+      text: hotel?.city.isNotEmpty == true ? hotel!.city : (defaultCity ?? 'Kołobrzeg'),
+    );
+    final noteCtrl = TextEditingController(text: hotel?.note ?? '');
+
+    const popularCities = ['Kołobrzeg', 'Świnoujście', 'Międzyzdroje', 'Ustronie Morskie', 'Mrzeżyno'];
+
+    final dialogAccent = _isDark ? AppColors.activeTheme.secondaryAccent : AppColors.brandingOrange;
+    final focusedBorderColor = _isDark ? AppColors.activeTheme.secondaryAccent.withValues(alpha: 0.8) : AppColors.brandingOrange;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          backgroundColor: _cardBg,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: BorderSide(color: _borderColor),
+          ),
+          title: Row(
+            children: [
+              Icon(Icons.hotel_rounded, color: dialogAccent),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      isEditing ? 'Edycja hotelu' : 'Nowy Hotel / Ośrodek',
+                      style: const TextStyle(fontSize: 12, color: AppColors.gray, fontWeight: FontWeight.w600),
+                    ),
+                    Text(
+                      isEditing ? hotel.name : 'Dodaj do bazy stałej',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _textPrimary),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Hotel zostanie zapamiętany w bazie na stałe i nie zniknie po zakończeniu wyjazdu.',
+                  style: TextStyle(fontSize: 12, color: _textSecondary),
+                ),
+                const SizedBox(height: 14),
+                // Nazwa hotelu
+                TextField(
+                  controller: nameCtrl,
+                  autofocus: !isEditing,
+                  style: TextStyle(color: _textPrimary, fontSize: 14),
+                  decoration: InputDecoration(
+                    labelText: 'Nazwa hotelu / ośrodka *',
+                    hintText: 'np. San, Arka, Hotel New Skanpol',
+                    labelStyle: TextStyle(color: _textSecondary),
+                    hintStyle: const TextStyle(color: Colors.grey, fontSize: 13),
+                    prefixIcon: const Icon(Icons.apartment_rounded, size: 20),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide(color: focusedBorderColor, width: 1.5),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                // Miejscowość
+                TextField(
+                  controller: cityCtrl,
+                  style: TextStyle(color: _textPrimary, fontSize: 14),
+                  decoration: InputDecoration(
+                    labelText: 'Miejscowość *',
+                    hintText: 'np. Kołobrzeg',
+                    labelStyle: TextStyle(color: _textSecondary),
+                    hintStyle: const TextStyle(color: Colors.grey, fontSize: 13),
+                    prefixIcon: const Icon(Icons.location_city_outlined, size: 20),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide(color: focusedBorderColor, width: 1.5),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                // Szybki wybór popularnych miejscowości
+                Wrap(
+                  spacing: 4,
+                  runSpacing: 2,
+                  children: popularCities.map((c) {
+                    final isSel = cityCtrl.text.trim().toLowerCase() == c.toLowerCase();
+                    return ChoiceChip(
+                      label: Text(
+                        c,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: isSel
+                              ? (_isDark ? AppColors.activeTheme.secondaryAccent : Colors.white)
+                              : _textSecondary,
+                          fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
+                        ),
+                      ),
+                      selected: isSel,
+                      selectedColor: _isDark ? AppColors.activeTheme.primaryAccent : AppColors.brandingOrange,
+                      side: BorderSide(
+                        color: isSel
+                            ? (_isDark ? AppColors.activeTheme.secondaryAccent.withValues(alpha: 0.6) : AppColors.brandingOrange)
+                            : _borderColor.withValues(alpha: 0.4),
+                      ),
+                      backgroundColor: _isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05),
+                      visualDensity: VisualDensity.compact,
+                      onSelected: (_) {
+                        setDialogState(() {
+                          cityCtrl.text = c;
+                        });
+                      },
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 12),
+                // Ulica i numer budynku
+                TextField(
+                  controller: addressCtrl,
+                  style: TextStyle(color: _textPrimary, fontSize: 14),
+                  decoration: InputDecoration(
+                    labelText: 'Ulica i numer budynku *',
+                    hintText: 'np. ul. Kasprowicza 24',
+                    labelStyle: TextStyle(color: _textSecondary),
+                    hintStyle: const TextStyle(color: Colors.grey, fontSize: 13),
+                    prefixIcon: const Icon(Icons.location_on_outlined, size: 20),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide(color: focusedBorderColor, width: 1.5),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                // Wskazówka / Uwagi
+                TextField(
+                  controller: noteCtrl,
+                  style: TextStyle(color: _textPrimary, fontSize: 14),
+                  decoration: InputDecoration(
+                    labelText: 'Wskazówka / Uwagi (opcjonalnie)',
+                    hintText: 'np. Wjazd od promenady, dzwonek przy szlabanie',
+                    labelStyle: TextStyle(color: _textSecondary),
+                    hintStyle: const TextStyle(color: Colors.grey, fontSize: 13),
+                    prefixIcon: const Icon(Icons.notes_outlined, size: 20),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide(color: focusedBorderColor, width: 1.5),
+                    ),
+                  ),
+                ),
+                if (hotel != null && hotel.fullAddress.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  TextButton.icon(
+                    onPressed: () {
+                      LauncherService.openNavigation(context, hotel.fullAddress);
+                    },
+                    icon: Icon(Icons.near_me_outlined, size: 16, color: dialogAccent),
+                    label: Text(
+                      'Sprawdź w Google Maps (${hotel.fullAddress})',
+                      style: TextStyle(fontSize: 12, color: dialogAccent),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Anuluj', style: TextStyle(color: Colors.grey)),
+            ),
+            FilledButton.icon(
+              style: FilledButton.styleFrom(
+                backgroundColor: _isDark ? AppColors.activeTheme.primaryAccent : AppColors.brandingOrange,
+                foregroundColor: _isDark ? AppColors.activeTheme.secondaryAccent : Colors.white,
+                side: BorderSide(
+                  color: _isDark ? AppColors.activeTheme.border.withValues(alpha: 0.8) : Colors.transparent,
+                ),
+              ),
+              onPressed: () async {
+                final newName = nameCtrl.text.trim();
+                final newAddr = addressCtrl.text.trim();
+                final newCity = cityCtrl.text.trim();
+                final newNote = noteCtrl.text.trim();
+                if (newName.isEmpty) {
+                  _showNotice('Wpisz nazwę hotelu', Icons.warning_amber_rounded, Colors.orangeAccent);
+                  return;
+                }
+                Navigator.pop(ctx);
+                await HotelDirectoryService.saveHotel(
+                  name: newName,
+                  address: newAddr,
+                  city: newCity,
+                  note: newNote.isNotEmpty ? newNote : null,
+                );
+                if (mounted) {
+                  setState(() {});
+                  _showNotice('Zapisano hotel $newName', Icons.check_circle, Colors.greenAccent);
+                }
+              },
+              icon: const Icon(Icons.save_rounded, size: 18),
+              label: const Text('Zapisz na stałe', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _confirmDeleteHotel(HotelInfo hotel) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _cardBg,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: _borderColor),
+        ),
+        title: Row(
+          children: [
+            const Icon(Icons.delete_outline_rounded, color: Colors.redAccent),
+            const SizedBox(width: 8),
+            Text('Usuń hotel', style: TextStyle(color: _textPrimary, fontSize: 17, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: Text(
+          'Czy na pewno chcesz usunąć hotel "${hotel.name}" (${hotel.city}) z bazy?',
+          style: TextStyle(color: _textSecondary, fontSize: 13.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Anuluj', style: TextStyle(color: Colors.grey)),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await HotelDirectoryService.deleteHotel(hotel.name);
+              if (mounted) {
+                setState(() {});
+                _showNotice('Usunięto hotel ${hotel.name}', Icons.delete_outline, Colors.orangeAccent);
+              }
+            },
+            child: const Text('Usuń', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
