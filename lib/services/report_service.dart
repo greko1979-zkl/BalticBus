@@ -1,9 +1,9 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../models/route_models.dart';
 import '../theme/app_colors.dart';
+import 'docx_report_service.dart';
 
 class ReportService {
   static String generateSummaryText(BusRoute route) {
@@ -114,15 +114,19 @@ class ReportService {
     return buffer.toString();
   }
 
-  /// Zapisuje raport do fizycznego pliku na Biurku Maca podczas testów w symulatorze
-  static Future<String?> saveReportToDesktop(BuildContext context, BusRoute route) async {
+  /// Zapisuje raport do pliku w pamięci telefonu
+  static Future<String?> saveReport(BuildContext context, BusRoute route) async {
     final text = generateSummaryText(route);
     final cleanCode = route.code.replaceAll(RegExp(r'[^\w.-]'), '_');
     final cleanDirection = route.direction.replaceAll(RegExp(r'[^\w.-]'), '_');
     final fileName = 'Rozliczenie_${cleanCode}_${route.date}_$cleanDirection.txt';
 
-    return _writeFileToDesktop(context, fileName, text);
+    return _writeFileToTarget(context, fileName, text);
   }
+
+  /// Alias zachowujący kompatybilność wsteczną
+  static Future<String?> saveReportToDesktop(BuildContext context, BusRoute route) =>
+      saveReport(context, route);
 
   /// Generuje pełny dokument "PLAN JAZDY" zliczony wspólnie z dwóch dni (Sobota + Niedziela)
   static String generatePlanJazdyText(WeekendTripSummary summary) {
@@ -169,12 +173,23 @@ class ReportService {
       }
       buffer.writeln('  Razem EUR: ${summary.totalExpensesEur.toStringAsFixed(2)} EUR');
     }
+    if (summary.advanceEur > 0) {
+      buffer.writeln('  Pozostało z zaliczki (reszta): ${summary.remainingAdvanceEur.toStringAsFixed(2)} EUR');
+    }
     buffer.writeln('─────────────────────────────────────────────────────');
     final guestPln = summary.cashCollectedPln > 0 ? '${summary.cashCollectedPln.toStringAsFixed(2)} zł' : '';
     final guestEur = summary.cashCollectedEur > 0 ? '${summary.cashCollectedEur.toStringAsFixed(2)} €' : '';
     final guestText = [guestEur, guestPln].where((s) => s.isNotEmpty).join(' / ');
     buffer.writeln('ODEBRANE OD GOŚCI:');
-    buffer.writeln('  ${guestText.isNotEmpty ? guestText : '0,00 zł / 0,00 €'}');
+    if (summary.guestPayments.isNotEmpty) {
+      for (final p in summary.guestPayments) {
+        final passStr = p.passengerName.isNotEmpty ? ' - ${p.passengerName}' : '';
+        buffer.writeln('  • ${p.amount.toStringAsFixed(2)} ${p.currency}$passStr');
+      }
+      buffer.writeln('  Razem: ${guestText.isNotEmpty ? guestText : '0,00 zł / 0,00 €'}');
+    } else {
+      buffer.writeln('  ${guestText.isNotEmpty ? guestText : '0,00 zł / 0,00 €'}');
+    }
     buffer.writeln('─────────────────────────────────────────────────────');
     final consStr = consumption != null ? '${consumption.toStringAsFixed(1).replaceAll('.', ',')} l/100km' : 'brak danych';
     buffer.writeln('ŚR. SPALANIE: $consStr');
@@ -222,29 +237,26 @@ class ReportService {
     return buffer.toString();
   }
 
-  /// Zapisuje całościowy PLAN JAZDY z obu dni na Biurku Maca
-  static Future<String?> savePlanJazdyToDesktop(BuildContext context, WeekendTripSummary summary) async {
+  /// Zapisuje całościowy PLAN JAZDY z obu dni w pamięci telefonu
+  static Future<String?> savePlanJazdy(BuildContext context, WeekendTripSummary summary) async {
     final text = generatePlanJazdyText(summary);
     final cleanCode = summary.busCode.replaceAll(RegExp(r'[^\w.-]'), '_');
     final cleanDates = summary.dateRange.replaceAll(RegExp(r'[^\w.-]'), '_');
     final fileName = 'Plan_Jazdy_${cleanCode}_$cleanDates.txt';
 
-    return _writeFileToDesktop(context, fileName, text);
+    return _writeFileToTarget(context, fileName, text);
   }
 
-  static Future<String?> _writeFileToDesktop(BuildContext context, String fileName, String text) async {
+  /// Alias zachowujący kompatybilność wsteczną
+  static Future<String?> savePlanJazdyToDesktop(BuildContext context, WeekendTripSummary summary) =>
+      savePlanJazdy(context, summary);
+
+  static Future<String?> _writeFileToTarget(BuildContext context, String fileName, String text) async {
     try {
-      final macDesktop = Directory('/Users/greko/Desktop');
-      File targetFile;
+      final targetFile = await DocxReportService.getTargetFile(fileName);
+      await targetFile.writeAsString(text, flush: true);
 
-      if (macDesktop.existsSync()) {
-        targetFile = File('${macDesktop.path}/$fileName');
-      } else {
-        final tempDir = Directory.systemTemp;
-        targetFile = File('${tempDir.path}/$fileName');
-      }
-
-      await targetFile.writeAsString(text);
+      final locationText = DocxReportService.getFriendlyLocationDescription();
 
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -252,11 +264,11 @@ class ReportService {
             backgroundColor: AppColors.primary,
             content: Row(
               children: [
-                const Icon(Icons.desktop_mac, color: AppColors.brandingOrange, size: 20),
-                const SizedBox(width: 8),
+                const Icon(Icons.file_download_done, color: Color(0xFF27AE60), size: 22),
+                const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    'Zapisano plik na Twoim Biurku:\n$fileName',
+                    'Zapisano plik $locationText:\n$fileName',
                     style: const TextStyle(color: Colors.white, fontSize: 13),
                   ),
                 ),
@@ -279,6 +291,7 @@ class ReportService {
       return null;
     }
   }
+
 
   static Future<void> sendViaWhatsApp(BuildContext context, String text) async {
     final uri = Uri.parse('https://wa.me/?text=${Uri.encodeComponent(text)}');

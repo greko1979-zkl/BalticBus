@@ -266,6 +266,38 @@ class BusRoute {
       breaks.fold(0, (sum, b) => sum + b.durationMinutes);
 }
 
+class GuestPaymentEntry {
+  final String id;
+  final double amount;
+  final String currency; // 'PLN' lub 'EUR'
+  final String passengerName;
+  final DateTime timestamp;
+
+  GuestPaymentEntry({
+    required this.id,
+    required this.amount,
+    this.currency = 'PLN',
+    this.passengerName = '',
+    required this.timestamp,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'amount': amount,
+    'currency': currency,
+    'passengerName': passengerName,
+    'timestamp': timestamp.toIso8601String(),
+  };
+
+  factory GuestPaymentEntry.fromJson(Map<String, dynamic> json) => GuestPaymentEntry(
+    id: json['id'] as String? ?? '',
+    amount: (json['amount'] as num?)?.toDouble() ?? 0.0,
+    currency: json['currency'] as String? ?? 'PLN',
+    passengerName: json['passengerName'] as String? ?? '',
+    timestamp: DateTime.tryParse(json['timestamp'] as String? ?? '') ?? DateTime.now(),
+  );
+}
+
 class WeekendTripSummary {
   final String busCode;
   final String dateRange; // np. 01.08 - 02.08.2026
@@ -277,8 +309,9 @@ class WeekendTripSummary {
   final BusRoute? sundayRoute;
   double advanceEur;
   double advancePln;
-  double cashCollectedPln;
-  double cashCollectedEur;
+  double _manualCashCollectedPln;
+  double _manualCashCollectedEur;
+  List<GuestPaymentEntry> guestPayments;
 
   WeekendTripSummary({
     required this.busCode,
@@ -291,9 +324,34 @@ class WeekendTripSummary {
     this.sundayRoute,
     this.advanceEur = 0.0,
     this.advancePln = 0.0,
-    this.cashCollectedPln = 0.0,
-    this.cashCollectedEur = 0.0,
-  });
+    double cashCollectedPln = 0.0,
+    double cashCollectedEur = 0.0,
+    List<GuestPaymentEntry>? guestPayments,
+  })  : _manualCashCollectedPln = cashCollectedPln,
+        _manualCashCollectedEur = cashCollectedEur,
+        guestPayments = guestPayments ?? [];
+
+  double get cashCollectedPln {
+    if (guestPayments.isNotEmpty) {
+      return guestPayments
+          .where((p) => p.currency == 'PLN')
+          .fold(0.0, (sum, p) => sum + p.amount);
+    }
+    return _manualCashCollectedPln;
+  }
+
+  set cashCollectedPln(double val) => _manualCashCollectedPln = val;
+
+  double get cashCollectedEur {
+    if (guestPayments.isNotEmpty) {
+      return guestPayments
+          .where((p) => p.currency == 'EUR')
+          .fold(0.0, (sum, p) => sum + p.amount);
+    }
+    return _manualCashCollectedEur;
+  }
+
+  set cashCollectedEur(double val) => _manualCashCollectedEur = val;
 
   int? get startOdometer =>
       saturdayRoute?.startOdometerKm ?? sundayRoute?.startOdometerKm;
@@ -339,6 +397,12 @@ class WeekendTripSummary {
 
   double get totalExpensesEur =>
       expensesEur.fold(0.0, (sum, r) => sum + r.amount);
+
+  /// Pozostała kwota z zaliczki EUR po odliczeniu wydatków w EUR (reszta)
+  double get remainingAdvanceEur => advanceEur - totalExpensesEur;
+
+  /// Pozostała kwota z zaliczki PLN po odliczeniu wydatków w PLN
+  double get remainingAdvancePln => advancePln - totalExpensesPln;
 
   double? get averageConsumptionLPer100Km {
     final dist = totalDistanceKm ?? (plannedTotalDistanceKm > 0 ? plannedTotalDistanceKm : null);

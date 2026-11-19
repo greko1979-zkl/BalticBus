@@ -2,13 +2,76 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:archive/archive.dart';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 import '../models/route_models.dart';
 import '../theme/app_colors.dart';
 
 class DocxReportService {
+  /// Ustala docelową ścieżkę zapisu pliku na telefonie
+  static Future<File> getTargetFile(String fileName) async {
+    // 1. Android: próba zapisu do publicznego folderu Pobrane (/storage/emulated/0/Download)
+    if (Platform.isAndroid) {
+      try {
+        final downloadDir = Directory('/storage/emulated/0/Download');
+        if (downloadDir.existsSync()) {
+          final target = File('${downloadDir.path}/$fileName');
+          await target.writeAsBytes(const [0], flush: true);
+          return target;
+        }
+      } catch (_) {}
+
+      // Android: standardowy katalog Downloads z path_provider
+      try {
+        final downDir = await getDownloadsDirectory();
+        if (downDir != null) {
+          final target = File('${downDir.path}/$fileName');
+          await target.writeAsBytes(const [0], flush: true);
+          return target;
+        }
+      } catch (_) {}
+
+      // Android: zewnętrzny katalog plików aplikacji
+      try {
+        final extDir = await getExternalStorageDirectory();
+        if (extDir != null) {
+          return File('${extDir.path}/$fileName');
+        }
+      } catch (_) {}
+    }
+
+    // 2. Desktop (macOS / Windows / Linux) - folder Pobrane (Downloads)
+    if (Platform.isMacOS || Platform.isWindows || Platform.isLinux) {
+      try {
+        final downDir = await getDownloadsDirectory();
+        if (downDir != null) {
+          return File('${downDir.path}/$fileName');
+        }
+      } catch (_) {}
+    }
+
+    // 3. iOS / Ogólny: Katalog dokumentów aplikacji (widoczny w iOS w aplikacji Pliki -> "BalticBus")
+    try {
+      final docsDir = await getApplicationDocumentsDirectory();
+      return File('${docsDir.path}/$fileName');
+    } catch (_) {}
+
+    return File('${Directory.systemTemp.path}/$fileName');
+  }
+
+  /// Zwraca czytelny opis lokalizacji zapisu dostosowany do platformy telefonu
+  static String getFriendlyLocationDescription() {
+    if (Platform.isIOS) {
+      return 'w telefonie (aplikacja Pliki ➔ BalticBus)';
+    } else if (Platform.isAndroid) {
+      return 'w telefonie (folder Pobrane)';
+    } else {
+      return 'w folderze Pobrane';
+    }
+  }
+
   /// Generuje plik Word (.docx) zliczony z całego weekendu (Sobota + Niedziela)
-  /// i zapisuje go bezpośrednio na Biurku Maca w katalogu /Users/greko/Desktop/
-  static Future<String?> savePlanJazdyDocxToDesktop(
+  /// i zapisuje go w docelowym miejscu w telefonie (folder Pobrane / Pliki)
+  static Future<String?> savePlanJazdyDocx(
     BuildContext context,
     WeekendTripSummary summary,
   ) async {
@@ -19,17 +82,10 @@ class DocxReportService {
       final cleanDates = summary.dateRange.replaceAll(RegExp(r'[^\w.-]'), '_');
       final fileName = 'Plan_Jazdy_${cleanCode}_$cleanDates.docx';
 
-      final macDesktop = Directory('/Users/greko/Desktop');
-      File targetFile;
+      final targetFile = await getTargetFile(fileName);
+      await targetFile.writeAsBytes(docxBytes, flush: true);
 
-      if (macDesktop.existsSync()) {
-        targetFile = File('${macDesktop.path}/$fileName');
-      } else {
-        final tempDir = Directory.systemTemp;
-        targetFile = File('${tempDir.path}/$fileName');
-      }
-
-      await targetFile.writeAsBytes(docxBytes);
+      final locationText = getFriendlyLocationDescription();
 
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -37,11 +93,11 @@ class DocxReportService {
             backgroundColor: AppColors.primary,
             content: Row(
               children: [
-                const Icon(Icons.description, color: AppColors.brandingOrange, size: 20),
-                const SizedBox(width: 8),
+                const Icon(Icons.file_download_done, color: Color(0xFF27AE60), size: 22),
+                const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    'Zapisano plik Word (.docx) na Twoim Biurku:\n$fileName',
+                    'Zapisano plik Word (.docx) $locationText:\n$fileName',
                     style: const TextStyle(color: Colors.white, fontSize: 13),
                   ),
                 ),
@@ -64,6 +120,13 @@ class DocxReportService {
       return null;
     }
   }
+
+  /// Alias zachowujący kompatybilność wsteczną
+  static Future<String?> savePlanJazdyDocxToDesktop(
+    BuildContext context,
+    WeekendTripSummary summary,
+  ) =>
+      savePlanJazdyDocx(context, summary);
 
   /// Tworzy binarną zawartość archiwum OpenXML (.docx)
   static List<int> generatePlanJazdyDocxBytes(WeekendTripSummary summary) {
@@ -408,6 +471,16 @@ class DocxReportService {
         ''');
       }
     }
+    if (summary.advanceEur > 0) {
+      final remColor = summary.remainingAdvanceEur >= 0 ? "007A3D" : "C10801";
+      buffer.write('''
+        <w:p>
+          <w:pPr><w:spacing w:before="60" w:after="40"/></w:pPr>
+          <w:r><w:rPr><w:b/><w:sz w:val="18"/></w:rPr><w:t>POZOSTAŁO Z ZALICZKI (RESZTA): </w:t></w:r>
+          <w:r><w:rPr><w:b/><w:sz w:val="22"/><w:color w:val="$remColor"/></w:rPr><w:t>${summary.remainingAdvanceEur.toStringAsFixed(2)} EUR</w:t></w:r>
+        </w:p>
+      ''');
+    }
     buffer.write('</w:tc></w:tr></w:tbl>');
 
     // Odstęp
@@ -438,14 +511,31 @@ class DocxReportService {
             <w:pPr><w:spacing w:after="40"/></w:pPr>
             <w:r><w:rPr><w:b/><w:sz w:val="18"/></w:rPr><w:t>ODEBRANE OD GOŚCI</w:t></w:r>
           </w:p>
-          <w:p>
-            <w:pPr><w:spacing w:after="60"/></w:pPr>
-            <w:r><w:rPr><w:b/><w:sz w:val="22"/></w:rPr><w:t>${_esc(guestText)}</w:t></w:r>
-          </w:p>
-        </w:tc>
-      </w:tr>
-    </w:tbl>
     ''');
+    if (summary.guestPayments.isNotEmpty) {
+      for (final p in summary.guestPayments) {
+        final passStr = p.passengerName.isNotEmpty ? ' - ${_esc(p.passengerName)}' : '';
+        buffer.write('''
+          <w:p>
+            <w:r><w:rPr><w:b/><w:sz w:val="22"/></w:rPr><w:t>• ${p.amount.toStringAsFixed(2)} ${p.currency}$passStr</w:t></w:r>
+          </w:p>
+        ''');
+      }
+      buffer.write('''
+        <w:p>
+          <w:pPr><w:spacing w:before="40" w:after="60"/></w:pPr>
+          <w:r><w:rPr><w:b/><w:sz w:val="20"/></w:rPr><w:t>Razem: ${_esc(guestText)}</w:t></w:r>
+        </w:p>
+      ''');
+    } else {
+      buffer.write('''
+        <w:p>
+          <w:pPr><w:spacing w:after="60"/></w:pPr>
+          <w:r><w:rPr><w:b/><w:sz w:val="22"/></w:rPr><w:t>${_esc(guestText)}</w:t></w:r>
+        </w:p>
+      ''');
+    }
+    buffer.write('</w:tc></w:tr></w:tbl>');
 
     // Odstęp
     buffer.write('<w:p><w:pPr><w:spacing w:after="80"/></w:pPr></w:p>');

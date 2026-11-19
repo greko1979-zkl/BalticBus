@@ -195,21 +195,49 @@ class _SplashScreenState extends State<SplashScreen>
                   opacity: _fadeAnimation,
                   child: ScaleTransition(
                     scale: _scaleAnimation,
-                    child: Container(
-                      width: double.infinity,
-                      constraints: const BoxConstraints(maxWidth: 380),
-                      height: 150,
-                      alignment: Alignment.center,
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Image.asset(
-                        'assets/images/balticbus_logo.png',
-                        fit: BoxFit.contain,
-                        errorBuilder: (context, error, stackTrace) => const Icon(
-                          Icons.directions_bus,
-                          color: Colors.white,
-                          size: 72,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 16),
+                          child: Text(
+                            'Probably the best door-to-door transport in Europe.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w700,
+                              fontStyle: FontStyle.normal,
+                              letterSpacing: 1.2,
+                              height: 1.3,
+                              color: Color(0xFFCBB79F),
+                              shadows: [
+                                Shadow(
+                                  color: Colors.black,
+                                  blurRadius: 14,
+                                  offset: Offset(0, 2),
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
-                      ),
+                        const SizedBox(height: 16),
+                        Container(
+                          width: double.infinity,
+                          constraints: const BoxConstraints(maxWidth: 380),
+                          height: 150,
+                          alignment: Alignment.center,
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: Image.asset(
+                            'assets/images/balticbus_logo.png',
+                            fit: BoxFit.contain,
+                            errorBuilder: (context, error, stackTrace) => const Icon(
+                              Icons.directions_bus,
+                              color: Colors.white,
+                              size: 72,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -233,6 +261,8 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
   String _selectedDate = '2026-08-01'; // Sobota wywóz lub Niedziela przywóz
   bool _isLoading = false;
   int _currentTabIndex = 0;
+  bool _isNightHudMode = false;
+  int? _hudManualStopIndex;
   String? _selectedHotelCity;
   final TextEditingController _hotelSearchController = TextEditingController();
   String _hotelSearchQuery = '';
@@ -241,9 +271,14 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
   double _advancePln = 0.0;
   double _cashCollectedPln = 0.0;
   double _cashCollectedEur = 0.0;
+  List<GuestPaymentEntry> _guestPayments = [];
   bool _showDevOptions = false;
   int _logoTapCounter = 0;
   OverlayEntry? _currentNoticeOverlay;
+  DateTime? _driveStartTime;
+  DateTime? _coffeeBreakSnoozeUntil;
+  int _coffeeReminderMinutes = 150; // 2.5 godziny domyślnie
+  Timer? _driveTimeTicker;
 
   bool get _isDark => Theme.of(context).brightness == Brightness.dark;
   Color get _cardBg => _isDark
@@ -262,38 +297,52 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
   @override
   void initState() {
     super.initState();
-    final hasActive = widget.initialHasActiveTrip ?? true;
+    final hasActive = widget.initialHasActiveTrip ?? false;
     _allRoutes = hasActive ? sampleBusRoutes : [];
     _checkInitialTripState();
+    _driveTimeTicker = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (mounted) setState(() {});
+    });
   }
 
   Future<void> _checkInitialTripState() async {
-    final hasActive = await StorageService.hasActiveTrip();
+    final hasActive = widget.initialHasActiveTrip ?? await StorageService.hasActiveTrip();
     if (!hasActive) {
       if (mounted && _allRoutes.isNotEmpty) {
         setState(() {
           _allRoutes = [];
         });
       }
-    } else {
-      // Automatycznie wczytujemy kompletny rozkład z pliku Excel (assets)
+      return;
+    }
+
+    // Kurs jest oznaczony jako aktywny -> odtwórz zapisane źródło trasy
+    final source = await StorageService.loadActiveTripSource();
+    List<BusRoute> parsed = [];
+    if (source.excelBytes != null && source.excelBytes!.isNotEmpty) {
+      parsed = ExcelParserService.parseExcelBytes(Uint8List.fromList(source.excelBytes!));
+    } else if (source.assetPath != null && source.assetPath!.isNotEmpty) {
       try {
-        final parsed = await ExcelParserService.loadFromAssets();
-        if (parsed.isNotEmpty && mounted) {
-          await HotelDirectoryService.ingestHotelsFromRoutes(parsed);
-          setState(() {
-            _allRoutes = parsed;
-          });
-        }
-      } catch (_) {
-        if (_allRoutes.isEmpty && mounted) {
-          await HotelDirectoryService.ingestHotelsFromRoutes(sampleBusRoutes);
-          setState(() {
-            _allRoutes = sampleBusRoutes;
-          });
-        }
+        parsed = await ExcelParserService.loadFromAssets(source.assetPath!);
+      } catch (_) {}
+    }
+
+    if (parsed.isNotEmpty && mounted) {
+      final busCodes = parsed.map((r) => r.code).toSet().toList();
+      if (source.busCode != null && busCodes.contains(source.busCode)) {
+        _selectedBusCode = source.busCode!;
       }
+      await HotelDirectoryService.ingestHotelsFromRoutes(parsed);
+      setState(() {
+        _allRoutes = parsed;
+      });
       await _restoreStateForRoute(_currentRoute);
+    } else if (mounted) {
+      if (_allRoutes.isEmpty) {
+        await StorageService.setHasActiveTrip(false);
+      } else {
+        await _restoreStateForRoute(_currentRoute);
+      }
     }
   }
 
@@ -371,6 +420,23 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
     _advancePln = fin.advancePln;
     _cashCollectedPln = fin.cashPln;
     _cashCollectedEur = fin.cashEur;
+    _guestPayments = await StorageService.loadGuestPayments(route.code);
+    if (_guestPayments.isNotEmpty) {
+      _cashCollectedPln = _guestPayments.where((p) => p.currency == 'PLN').fold(0.0, (sum, p) => sum + p.amount);
+      _cashCollectedEur = _guestPayments.where((p) => p.currency == 'EUR').fold(0.0, (sum, p) => sum + p.amount);
+    }
+    final savedDriveStart = await StorageService.loadDriveStartTime(route.id);
+    if (savedDriveStart != null) {
+      _driveStartTime = savedDriveStart;
+    } else {
+      final firstPickup = route.stops
+          .where((s) => s.pickedUpAt != null)
+          .map((s) => s.pickedUpAt!)
+          .fold<DateTime?>(null, (min, dt) => min == null || dt.isBefore(min) ? dt : min);
+      _driveStartTime = firstPickup ?? DateTime.now();
+      await StorageService.saveDriveStartTime(route.id, _driveStartTime!);
+    }
+    _coffeeReminderMinutes = await StorageService.loadCoffeeReminderMinutes();
     if (mounted) setState(() {});
   }
 
@@ -388,6 +454,11 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
         if (!busCodes.contains(defaultBus)) {
           defaultBus = busCodes.first;
         }
+
+        await StorageService.saveActiveTripSource(
+          assetPath: assetPath,
+          busCode: defaultBus,
+        );
 
         setState(() {
           _allRoutes = routes;
@@ -559,6 +630,11 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
             if (!busCodes.contains(defaultBus)) {
               defaultBus = busCodes.first;
             }
+
+            await StorageService.saveActiveTripSource(
+              excelBytes: bytes,
+              busCode: defaultBus,
+            );
 
             setState(() {
               _allRoutes = routes;
@@ -789,6 +865,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                         ),
                         onPressed: () async {
                           Navigator.pop(dialogCtx);
+                          await StorageService.saveActiveBusCode(_selectedBusCode);
                           await _restoreStateForRoute(_currentRoute);
                           if (mounted) {
                             final busRoute = routes.firstWhere((r) => r.code == _selectedBusCode);
@@ -911,7 +988,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Upewnij się, że pobrałeś plik Word (.docx) lub wysłałeś raport na WhatsApp!',
+              'Upewnij się, że zapisałeś raport Word (.docx) w telefonie!',
               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5),
             ),
             const SizedBox(height: 10),
@@ -960,6 +1037,9 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
       _advancePln = 0.0;
       _cashCollectedPln = 0.0;
       _cashCollectedEur = 0.0;
+      _guestPayments = [];
+      _driveStartTime = null;
+      _coffeeBreakSnoozeUntil = null;
       _isLoading = false;
     });
     if (mounted) {
@@ -1079,33 +1159,66 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                         ),
                       ),
                       ),
-                      // Dolna sekcja: Pastylka "Rozpocznij przejazd" prowadząca do arkusza importu/zarządzania rozkładem
+                      // Dolna sekcja: Napis hasła oraz pastylka "Rozpocznij przejazd"
                       Padding(
                         padding: const EdgeInsets.only(top: 28, bottom: 20),
-                        child: FilledButton(
-                          style: FilledButton.styleFrom(
-                            backgroundColor: const Color(0xFF36322E),
-                            foregroundColor: const Color(0xFFFFE7D0),
-                            side: const BorderSide(
-                              color: Color(0xFF554D44),
-                              width: 1.2,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Padding(
+                              padding: EdgeInsets.symmetric(horizontal: 20),
+                              child: Text(
+                                'Probably the best door-to-door transport in Europe.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.w700,
+                                  fontStyle: FontStyle.normal,
+                                  letterSpacing: 1.2,
+                                  height: 1.3,
+                                  color: Color(0xFFCBB79F),
+                                  shadows: [
+                                    Shadow(
+                                      color: Colors.black,
+                                      blurRadius: 14,
+                                      offset: Offset(0, 2),
+                                    ),
+                                    Shadow(
+                                      color: Colors.black87,
+                                      blurRadius: 6,
+                                      offset: Offset(0, 1),
+                                    ),
+                                  ],
+                                ),
+                              ),
                             ),
-                            padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(30),
+                            const SizedBox(height: 18),
+                            FilledButton(
+                              style: FilledButton.styleFrom(
+                                backgroundColor: const Color(0xFF36322E),
+                                foregroundColor: const Color(0xFFFFE7D0),
+                                side: const BorderSide(
+                                  color: Color(0xFF554D44),
+                                  width: 1.2,
+                                ),
+                                padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(30),
+                                ),
+                                elevation: 2,
+                              ),
+                              onPressed: _showImportOptions,
+                              child: const Text(
+                                'Rozpocznij przejazd',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 0.5,
+                                  color: Color(0xFFFFE7D0),
+                                ),
+                              ),
                             ),
-                            elevation: 2,
-                          ),
-                          onPressed: _showImportOptions,
-                          child: const Text(
-                            'Rozpocznij przejazd',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 0.5,
-                              color: Color(0xFFFFE7D0),
-                            ),
-                          ),
+                          ],
                         ),
                       ),
                     ],
@@ -1168,12 +1281,16 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
           startTime: DateTime.now(),
         );
         route.breaks.add(b);
+        _coffeeBreakSnoozeUntil = null;
         _showNotice(
           'Rozpoczęto przerwę o ${_formatTime(b.startTime)}',
           Icons.coffee,
         );
       } else {
         active.endTime = DateTime.now();
+        _driveStartTime = active.endTime;
+        _coffeeBreakSnoozeUntil = null;
+        StorageService.saveDriveStartTime(route.id, _driveStartTime!);
         _showNotice(
           'Zakończono przerwę (${active.durationMinutes} min, ${_formatTime(active.startTime)} - ${_formatTime(active.endTime!)})',
           Icons.check_circle,
@@ -1192,6 +1309,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
       );
       setState(() {
         route.breaks.add(b);
+        _coffeeBreakSnoozeUntil = null;
       });
       StorageService.saveBreaks(route.id, route.breaks);
       _showNotice(
@@ -1213,8 +1331,11 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
         onEndBreak: () {
           setState(() {
             activeBreak.endTime = DateTime.now();
+            _driveStartTime = activeBreak.endTime;
+            _coffeeBreakSnoozeUntil = null;
           });
           StorageService.saveBreaks(_currentRoute.id, _currentRoute.breaks);
+          StorageService.saveDriveStartTime(_currentRoute.id, _driveStartTime!);
           _showNotice(
             'Zakończono przerwę (${activeBreak.durationMinutes} min, ${_formatTime(activeBreak.startTime)} - ${_formatTime(activeBreak.endTime!)})',
             Icons.check_circle,
@@ -1574,6 +1695,10 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
         final route = _currentRoute;
         final isPLtoDE = route.direction == 'PL-DE';
 
+        if (_isNightHudMode) {
+          return _buildNightCockpitHud(route, isPLtoDE, activeTheme);
+        }
+
         return Container(
           decoration: BoxDecoration(
             gradient: activeTheme.screenGradient,
@@ -1620,6 +1745,34 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
             ],
           ),
           actions: [
+            // Przycisk przełączania w tryb Kokpitu Nocnego (Duży HUD)
+            Container(
+              margin: const EdgeInsets.only(right: 6),
+              child: FilledButton.tonalIcon(
+                key: const ValueKey('hud_mode_toggle_btn'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: Colors.black.withValues(alpha: 0.35),
+                  foregroundColor: const Color(0xFFFF9800),
+                  side: BorderSide(
+                    color: const Color(0xFFFF9800).withValues(alpha: 0.75),
+                    width: 1.2,
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+                  visualDensity: VisualDensity.compact,
+                ),
+                onPressed: () {
+                  setState(() {
+                    _isNightHudMode = true;
+                    _hudManualStopIndex = null;
+                  });
+                },
+                icon: const Icon(Icons.speed_rounded, size: 17, color: Color(0xFFFF9800)),
+                label: const Text(
+                  'KOKPIT HUD',
+                  style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, letterSpacing: 0.4),
+                ),
+              ),
+            ),
             Container(
               margin: const EdgeInsets.only(right: 8),
               decoration: BoxDecoration(
@@ -1666,27 +1819,24 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
 
   Widget _buildBottomNavigationBar(BusRoute route) {
     final isDark = _isDark;
-    final theme = AppColors.activeTheme;
-    final selectedColor = theme.style == AppThemeStyle.balticNoir
-        ? const Color(0xFFFFE7D0)
-        : (theme.style == AppThemeStyle.balticOrange
-            ? AppColors.brandingOrange
-            : theme.secondaryAccent);
+    // Czysty, wyraźny kolor ikony i tekstu: soczysty pomarańcz Baltic dla aktywnej, stonowana szarość dla nieaktywnej
+    final selectedColor = isDark ? const Color(0xFFFF9800) : const Color(0xFFE65100);
+    final unselectedColor = isDark ? const Color(0xFF757575) : const Color(0xFF9E9E9E);
 
     return Container(
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF0C1014).withValues(alpha: 0.96) : Colors.white.withValues(alpha: 0.96),
+        color: isDark ? const Color(0xFF0C1014).withValues(alpha: 0.98) : Colors.white.withValues(alpha: 0.98),
         border: Border(
           top: BorderSide(
-            color: theme.border.withValues(alpha: 0.40),
-            width: 1.2,
+            color: isDark ? const Color(0xFF262626) : Colors.grey.shade300,
+            width: 1.0,
           ),
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.50),
-            blurRadius: 16,
-            offset: const Offset(0, -4),
+            color: Colors.black.withValues(alpha: 0.40),
+            blurRadius: 12,
+            offset: const Offset(0, -3),
           ),
         ],
       ),
@@ -1698,19 +1848,26 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
           backgroundColor: Colors.transparent,
           elevation: 0,
           selectedItemColor: selectedColor,
-          unselectedItemColor: Colors.white60,
+          unselectedItemColor: unselectedColor,
           selectedFontSize: 12,
           unselectedFontSize: 11,
+          selectedLabelStyle: const TextStyle(
+            fontWeight: FontWeight.bold,
+            letterSpacing: 0.3,
+          ),
+          unselectedLabelStyle: const TextStyle(
+            fontWeight: FontWeight.normal,
+          ),
           type: BottomNavigationBarType.fixed,
           items: [
             const BottomNavigationBarItem(
-              icon: Icon(Icons.alt_route_outlined),
-              activeIcon: Icon(Icons.alt_route),
+              icon: Icon(Icons.alt_route_outlined, size: 22),
+              activeIcon: Icon(Icons.alt_route, size: 24),
               label: 'Trasa',
             ),
             const BottomNavigationBarItem(
-              icon: Icon(Icons.local_gas_station_outlined),
-              activeIcon: Icon(Icons.local_gas_station),
+              icon: Icon(Icons.local_gas_station_outlined, size: 22),
+              activeIcon: Icon(Icons.local_gas_station, size: 24),
               label: 'Tankowanie',
             ),
             BottomNavigationBarItem(
@@ -1718,19 +1875,19 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                 isLabelVisible: route.activeBreak != null,
                 backgroundColor: const Color(0xFFC84031),
                 label: const Text('PAUZA', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold)),
-                child: const Icon(Icons.assignment_outlined),
+                child: const Icon(Icons.assignment_outlined, size: 22),
               ),
               activeIcon: Badge(
                 isLabelVisible: route.activeBreak != null,
                 backgroundColor: const Color(0xFFC84031),
                 label: const Text('PAUZA', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold)),
-                child: const Icon(Icons.assignment),
+                child: const Icon(Icons.assignment, size: 24),
               ),
               label: 'Raporty & Czas',
             ),
             const BottomNavigationBarItem(
-              icon: Icon(Icons.hotel_outlined),
-              activeIcon: Icon(Icons.hotel),
+              icon: Icon(Icons.hotel_outlined, size: 22),
+              activeIcon: Icon(Icons.hotel, size: 24),
               label: 'Hotele',
             ),
           ],
@@ -1787,6 +1944,11 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
         // Przełącznik Dnia (Sobota / Niedziela) + Pastylka Pauzy Kierowcy
         _buildDaySelector(route),
         const SizedBox(height: 12),
+
+        // Przypomnienie o kawie (jeśli kierowca jedzie >= 2.5h bez przerwy)
+        if (_shouldShowCoffeeReminder(route)) ...[
+          _buildCoffeeBreakReminderBanner(route),
+        ],
 
         // Specjalne uwagi i polecenia logistyczne
         if (route.specialNotes.isNotEmpty) ...[
@@ -2023,8 +2185,6 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
       );
     }
 
-    final isSundayHomePickup = !isPLtoDE && currentTarget.status == PickupStatus.pending;
-
     return Container(
       decoration: _convexDecoration(
         borderRadius: BorderRadius.circular(16),
@@ -2034,12 +2194,13 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
         borderWidth: 1.3,
         isHighlighted: true,
       ),
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15.5),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Imię i nazwisko pasażera + ikony zadzwoń, nawiguj + pastylka dowieziono/odebrano
+          // Imię i nazwisko pasażera (po lewej) + ikona słuchawki i strzałka nawigacji w kółeczkach (po prawej)
           Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Expanded(
                 child: Row(
@@ -2048,7 +2209,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                       child: Text(
                         currentTarget.name,
                         style: const TextStyle(
-                          fontSize: 18,
+                          fontSize: 20,
                           fontWeight: FontWeight.bold,
                           color: Colors.white,
                         ),
@@ -2058,26 +2219,32 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                     if (currentTarget.passengerCount > 1) ...[
                       const SizedBox(width: 6),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
                           color: Colors.black45,
-                          borderRadius: BorderRadius.circular(4),
+                          borderRadius: BorderRadius.circular(5),
+                          border: Border.all(color: Colors.amber.withValues(alpha: 0.5), width: 1),
                         ),
                         child: Text(
-                          '👥 ${currentTarget.passengerCount}',
-                          style: const TextStyle(fontSize: 11, color: Colors.amber, fontWeight: FontWeight.bold),
+                          '${currentTarget.passengerCount}',
+                          style: const TextStyle(fontSize: 12, color: Colors.amber, fontWeight: FontWeight.bold),
                         ),
                       ),
                     ],
                   ],
                 ),
               ),
+              const SizedBox(width: 10),
               if (currentTarget.phone.isNotEmpty) ...[
                 IconButton(
-                  visualDensity: VisualDensity.compact,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
-                  icon: const Icon(Icons.phone, size: 20, color: Colors.greenAccent),
+                  style: IconButton.styleFrom(
+                    shape: const CircleBorder(),
+                    backgroundColor: Colors.green.withValues(alpha: 0.20),
+                    side: BorderSide(color: Colors.greenAccent.withValues(alpha: 0.55), width: 1.2),
+                    minimumSize: const Size(42, 42),
+                    padding: EdgeInsets.zero,
+                  ),
+                  icon: const Icon(Icons.phone, size: 22, color: Colors.greenAccent),
                   tooltip: 'Zadzwoń (${currentTarget.phone})',
                   onPressed: () => LauncherService.openPhone(
                     context,
@@ -2085,13 +2252,17 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                     currentTarget.name,
                   ),
                 ),
-                const SizedBox(width: 2),
+                const SizedBox(width: 8),
               ],
               IconButton(
-                visualDensity: VisualDensity.compact,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
-                icon: const Icon(Icons.navigation, size: 20, color: AppColors.brandingOrange),
+                style: IconButton.styleFrom(
+                  shape: const CircleBorder(),
+                  backgroundColor: AppColors.brandingOrange.withValues(alpha: 0.20),
+                  side: BorderSide(color: AppColors.brandingOrange.withValues(alpha: 0.55), width: 1.2),
+                  minimumSize: const Size(42, 42),
+                  padding: EdgeInsets.zero,
+                ),
+                icon: const Icon(Icons.navigation, size: 22, color: AppColors.brandingOrange),
                 tooltip: 'Nawiguj do celu',
                 onPressed: () {
                   if (!isPLtoDE && currentTarget.resort.isNotEmpty) {
@@ -2113,37 +2284,13 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                   }
                 },
               ),
-              const SizedBox(width: 6),
-              FilledButton(
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF2D6A4F),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  visualDensity: VisualDensity.compact,
-                  minimumSize: const Size(0, 32),
-                ),
-                onPressed: () {
-                  _updatePassengerStatus(
-                    currentTarget,
-                    isPLtoDE
-                        ? PickupStatus.delivered
-                        : (isSundayHomePickup ? PickupStatus.pickedUp : PickupStatus.delivered),
-                  );
-                },
-                child: Text(
-                  isPLtoDE
-                      ? 'Dowieziono'
-                      : (isSundayHomePickup ? 'Odebrano' : 'Dowieziono'),
-                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                ),
-              ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 11),
 
           // Szczegóły trasy i godzin
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
             decoration: BoxDecoration(
               color: Colors.black.withValues(alpha: 0.35),
               borderRadius: BorderRadius.circular(12),
@@ -2157,12 +2304,12 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                   Row(
                     children: [
                       Container(
-                        padding: const EdgeInsets.all(7),
+                        padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
                           color: Colors.amber.withValues(alpha: 0.18),
                           borderRadius: BorderRadius.circular(8),
                         ),
-                        child: const Icon(Icons.hotel_rounded, size: 20, color: Colors.amber),
+                        child: const Icon(Icons.hotel_rounded, size: 22, color: Colors.amber),
                       ),
                       const SizedBox(width: 10),
                       Expanded(
@@ -2172,7 +2319,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                             const Text(
                               'ODBIÓR Z HOTELU',
                               style: TextStyle(
-                                fontSize: 10,
+                                fontSize: 11,
                                 fontWeight: FontWeight.bold,
                                 letterSpacing: 0.5,
                                 color: AppColors.gray,
@@ -2182,7 +2329,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                             Text(
                               currentTarget.resort.isNotEmpty ? currentTarget.resort : 'Hotel w Polsce',
                               style: const TextStyle(
-                                fontSize: 14.5,
+                                fontSize: 16,
                                 fontWeight: FontWeight.bold,
                                 color: Colors.white,
                               ),
@@ -2197,7 +2344,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                                   return Text(
                                     addr,
                                     style: TextStyle(
-                                      fontSize: 11.5,
+                                      fontSize: 12.5,
                                       color: Colors.white.withValues(alpha: 0.75),
                                     ),
                                     overflow: TextOverflow.ellipsis,
@@ -2209,7 +2356,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                         ),
                       ),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
                         decoration: BoxDecoration(
                           color: _isDark ? const Color(0xFF2C2A28) : Colors.amber.withValues(alpha: 0.18),
                           borderRadius: BorderRadius.circular(8),
@@ -2224,14 +2371,14 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                           children: [
                             Icon(
                               Icons.access_time_filled,
-                              size: 13,
+                              size: 14.5,
                               color: _isDark ? const Color(0xFFFFE7D0) : Colors.amber,
                             ),
                             const SizedBox(width: 5),
                             Text(
                               currentTarget.hotelTime ?? '--:--',
                               style: TextStyle(
-                                fontSize: 15,
+                                fontSize: 16.5,
                                 fontWeight: FontWeight.bold,
                                 color: _isDark ? const Color(0xFFFFE7D0) : Colors.amber,
                               ),
@@ -2243,7 +2390,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                   ),
 
                   const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 8),
+                    padding: EdgeInsets.symmetric(vertical: 9),
                     child: Divider(height: 1, color: Colors.white12),
                   ),
 
@@ -2252,12 +2399,12 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Container(
-                        padding: const EdgeInsets.all(7),
+                        padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
                           color: AppColors.brandingOrange.withValues(alpha: 0.18),
                           borderRadius: BorderRadius.circular(8),
                         ),
-                        child: const Icon(Icons.home_rounded, size: 20, color: AppColors.brandingOrange),
+                        child: const Icon(Icons.home_rounded, size: 22, color: AppColors.brandingOrange),
                       ),
                       const SizedBox(width: 10),
                       Expanded(
@@ -2267,7 +2414,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                             const Text(
                               'ADRES DOMOWY (NIEMCY)',
                               style: TextStyle(
-                                fontSize: 10,
+                                fontSize: 11,
                                 fontWeight: FontWeight.bold,
                                 letterSpacing: 0.5,
                                 color: AppColors.gray,
@@ -2277,7 +2424,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                             Text(
                               currentTarget.displayAddress,
                               style: const TextStyle(
-                                fontSize: 14,
+                                fontSize: 15.5,
                                 fontWeight: FontWeight.w600,
                                 color: Colors.white,
                                 height: 1.25,
@@ -2290,7 +2437,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                   ),
 
                   const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 8),
+                    padding: EdgeInsets.symmetric(vertical: 9),
                     child: Divider(height: 1, color: Colors.white12),
                   ),
 
@@ -2298,12 +2445,12 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                   Row(
                     children: [
                       Container(
-                        padding: const EdgeInsets.all(7),
+                        padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
                           color: const Color(0xFF27AE60).withValues(alpha: 0.18),
                           borderRadius: BorderRadius.circular(8),
                         ),
-                        child: const Icon(Icons.flag_rounded, size: 20, color: Color(0xFF52B788)),
+                        child: const Icon(Icons.flag_rounded, size: 22, color: Color(0xFF52B788)),
                       ),
                       const SizedBox(width: 10),
                       Expanded(
@@ -2313,7 +2460,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                             const Text(
                               'PLANOWANY DOJAZD DO DOMU',
                               style: TextStyle(
-                                fontSize: 10,
+                                fontSize: 11,
                                 fontWeight: FontWeight.bold,
                                 letterSpacing: 0.5,
                                 color: AppColors.gray,
@@ -2323,7 +2470,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                         ),
                       ),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
                         decoration: BoxDecoration(
                           color: const Color(0xFF27AE60).withValues(alpha: 0.22),
                           borderRadius: BorderRadius.circular(8),
@@ -2332,12 +2479,12 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Icon(Icons.schedule, size: 14, color: Color(0xFF52B788)),
+                            const Icon(Icons.schedule, size: 15, color: Color(0xFF52B788)),
                             const SizedBox(width: 5),
                             Text(
                               currentTarget.homeTimeDisplay,
                               style: const TextStyle(
-                                fontSize: 16,
+                                fontSize: 17.5,
                                 fontWeight: FontWeight.bold,
                                 color: Color(0xFF52B788),
                               ),
@@ -2354,12 +2501,12 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Container(
-                        padding: const EdgeInsets.all(7),
+                        padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
                           color: AppColors.brandingOrange.withValues(alpha: 0.18),
                           borderRadius: BorderRadius.circular(8),
                         ),
-                        child: const Icon(Icons.home_rounded, size: 20, color: AppColors.brandingOrange),
+                        child: const Icon(Icons.home_rounded, size: 22, color: AppColors.brandingOrange),
                       ),
                       const SizedBox(width: 10),
                       Expanded(
@@ -2369,7 +2516,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                             const Text(
                               'ODBIÓR Z ADRESU DOMOWEGO (NIEMCY)',
                               style: TextStyle(
-                                fontSize: 10,
+                                fontSize: 11,
                                 fontWeight: FontWeight.bold,
                                 letterSpacing: 0.5,
                                 color: AppColors.gray,
@@ -2379,7 +2526,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                             Text(
                               currentTarget.displayAddress,
                               style: const TextStyle(
-                                fontSize: 14,
+                                fontSize: 15.5,
                                 fontWeight: FontWeight.w600,
                                 color: Colors.white,
                                 height: 1.25,
@@ -2389,7 +2536,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                         ),
                       ),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
                         decoration: BoxDecoration(
                           color: _isDark ? const Color(0xFF2C2A28) : AppColors.brandingOrange.withValues(alpha: 0.18),
                           borderRadius: BorderRadius.circular(8),
@@ -2404,14 +2551,14 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                           children: [
                             Icon(
                               Icons.access_time_filled,
-                              size: 13,
+                              size: 14.5,
                               color: _isDark ? const Color(0xFFFFE7D0) : AppColors.brandingOrange,
                             ),
                             const SizedBox(width: 5),
                             Text(
                               currentTarget.homeTimeDisplay,
                               style: TextStyle(
-                                fontSize: 15,
+                                fontSize: 16.5,
                                 fontWeight: FontWeight.bold,
                                 color: _isDark ? const Color(0xFFFFE7D0) : AppColors.brandingOrange,
                               ),
@@ -2423,20 +2570,21 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                   ),
 
                   const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 8),
+                    padding: EdgeInsets.symmetric(vertical: 9),
                     child: Divider(height: 1, color: Colors.white12),
                   ),
 
-                  // 2. Hotel docelowy w Polsce + Planowany dojazd do hotelu
+                  // 2. Hotel docelowy w Polsce
                   Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Container(
-                        padding: const EdgeInsets.all(7),
+                        padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
                           color: Colors.blueAccent.withValues(alpha: 0.18),
                           borderRadius: BorderRadius.circular(8),
                         ),
-                        child: const Icon(Icons.hotel_rounded, size: 20, color: Colors.blueAccent),
+                        child: const Icon(Icons.hotel_rounded, size: 22, color: Colors.blueAccent),
                       ),
                       const SizedBox(width: 10),
                       Expanded(
@@ -2446,7 +2594,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                             const Text(
                               'HOTEL DOCELOWY W POLSCE',
                               style: TextStyle(
-                                fontSize: 10,
+                                fontSize: 11,
                                 fontWeight: FontWeight.bold,
                                 letterSpacing: 0.5,
                                 color: AppColors.gray,
@@ -2456,7 +2604,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                             Text(
                               currentTarget.resort.isNotEmpty ? currentTarget.resort : 'Hotel w Polsce',
                               style: const TextStyle(
-                                fontSize: 14.5,
+                                fontSize: 16,
                                 fontWeight: FontWeight.bold,
                                 color: Colors.white,
                               ),
@@ -2471,7 +2619,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                                   return Text(
                                     addr,
                                     style: TextStyle(
-                                      fontSize: 11.5,
+                                      fontSize: 12.5,
                                       color: Colors.white.withValues(alpha: 0.75),
                                     ),
                                     overflow: TextOverflow.ellipsis,
@@ -2482,24 +2630,60 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                           ],
                         ),
                       ),
+                    ],
+                  ),
+
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 9),
+                    child: Divider(height: 1, color: Colors.white12),
+                  ),
+
+                  // 3. Planowany dojazd do hotelu
+                  Row(
+                    children: [
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
-                          color: Colors.blueAccent.withValues(alpha: 0.22),
+                          color: const Color(0xFF27AE60).withValues(alpha: 0.18),
                           borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.blueAccent.withValues(alpha: 0.5)),
+                        ),
+                        child: const Icon(Icons.flag_rounded, size: 22, color: Color(0xFF52B788)),
+                      ),
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'PLANOWANY DOJAZD DO HOTELU',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 0.5,
+                                color: AppColors.gray,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF27AE60).withValues(alpha: 0.22),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: const Color(0xFF27AE60).withValues(alpha: 0.5)),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Icon(Icons.schedule, size: 14, color: Colors.lightBlueAccent),
+                            const Icon(Icons.schedule, size: 15, color: Color(0xFF52B788)),
                             const SizedBox(width: 5),
                             Text(
                               currentTarget.hotelTime ?? '--:--',
                               style: const TextStyle(
-                                fontSize: 16,
+                                fontSize: 17.5,
                                 fontWeight: FontWeight.bold,
-                                color: Colors.lightBlueAccent,
+                                color: Color(0xFF52B788),
                               ),
                             ),
                           ],
@@ -2511,32 +2695,1045 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
               ],
             ),
           ),
-          if (currentTarget.comment.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(
-                color: const Color(0xFFC10801).withValues(alpha: 0.25),
-                borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: const Color(0xFFC10801).withValues(alpha: 0.5)),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.info_outline, size: 13, color: Color(0xFFFF8A80)),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: Text(
-                      'Uwagi: ${currentTarget.comment}',
-                      style: const TextStyle(fontSize: 11.5, color: Color(0xFFFF8A80), fontWeight: FontWeight.w600),
+
+          // Pod planowany dojazd: małe przyciski (Odebrany, Dostarczony, Przesiadka)
+          const SizedBox(height: 9),
+          Row(
+            children: [
+              // 1. ODEBRANY
+              Expanded(
+                child: FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: currentTarget.status == PickupStatus.pickedUp
+                        ? const Color(0xFF27AE60)
+                        : (_isDark ? const Color(0xFF1B4332) : const Color(0xFFE8F5E9)),
+                    foregroundColor: currentTarget.status == PickupStatus.pickedUp
+                        ? Colors.white
+                        : (_isDark ? Colors.white : const Color(0xFF1B5E20)),
+                    side: BorderSide(
+                      color: currentTarget.status == PickupStatus.pickedUp
+                          ? const Color(0xFF52B788)
+                          : (_isDark ? const Color(0xFF2D6A4F) : const Color(0xFF81C784)),
+                      width: currentTarget.status == PickupStatus.pickedUp ? 1.5 : 1.2,
                     ),
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 7),
+                    visualDensity: VisualDensity.compact,
+                    minimumSize: const Size(0, 38),
                   ),
-                ],
+                  onPressed: () {
+                    _updatePassengerStatus(currentTarget, PickupStatus.pickedUp);
+                  },
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        currentTarget.status == PickupStatus.pickedUp
+                            ? Icons.check_circle_rounded
+                            : Icons.check,
+                        size: 15,
+                      ),
+                      const SizedBox(width: 4),
+                      const Text(
+                        'Odebrany',
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
               ),
+              const SizedBox(width: 6),
+
+              // 2. DOSTARCZONY
+              Expanded(
+                child: FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: currentTarget.status == PickupStatus.delivered
+                        ? const Color(0xFF1976D2)
+                        : (_isDark ? const Color(0xFF0F2B48) : const Color(0xFFE3F2FD)),
+                    foregroundColor: currentTarget.status == PickupStatus.delivered
+                        ? Colors.white
+                        : (_isDark ? Colors.white : const Color(0xFF0D47A1)),
+                    side: BorderSide(
+                      color: currentTarget.status == PickupStatus.delivered
+                          ? const Color(0xFF64B5F6)
+                          : (_isDark ? const Color(0xFF1E5B8E) : const Color(0xFF90CAF9)),
+                      width: currentTarget.status == PickupStatus.delivered ? 1.5 : 1.2,
+                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 7),
+                    visualDensity: VisualDensity.compact,
+                    minimumSize: const Size(0, 38),
+                  ),
+                  onPressed: () {
+                    _updatePassengerStatus(currentTarget, PickupStatus.delivered);
+                  },
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        currentTarget.status == PickupStatus.delivered
+                            ? Icons.check_circle_rounded
+                            : Icons.home,
+                        size: 15,
+                      ),
+                      const SizedBox(width: 4),
+                      const Text(
+                        'Dostarczony',
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+
+              // 3. PRZESIADKA
+              Expanded(
+                child: FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: currentTarget.isTransfer
+                        ? const Color(0xFFE67E22)
+                        : (_isDark ? const Color(0xFF2E241D) : Colors.orange.shade50),
+                    foregroundColor: currentTarget.isTransfer
+                        ? Colors.white
+                        : (_isDark ? const Color(0xFFFFD4A8) : Colors.deepOrange),
+                    side: BorderSide(
+                      color: currentTarget.isTransfer
+                          ? const Color(0xFFB35900)
+                          : const Color(0xFFE67E22).withValues(alpha: 0.5),
+                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 7),
+                    visualDensity: VisualDensity.compact,
+                    minimumSize: const Size(0, 38),
+                  ),
+                  onPressed: () {
+                    _updatePassengerStatus(currentTarget, PickupStatus.delivered);
+                    _showNotice('Pasażer oznaczony jako przesiadka', Icons.sync_alt, const Color(0xFFE67E22));
+                  },
+                  child: const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.sync_alt, size: 15),
+                      SizedBox(width: 4),
+                      Text(
+                        'Przesiadka',
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (currentTarget.comment.isNotEmpty) ...[
+            const SizedBox(height: 7),
+            _PulsingCommentBadge(
+              comment: currentTarget.comment,
+              isHero: true,
             ),
           ],
         ],
       ),
     );
+  }
+
+  // TRYB KOKPIT NOCNY (DUŻY HUD)
+  Widget _buildNightCockpitHud(BusRoute route, bool isPLtoDE, AppThemeData activeTheme) {
+    final now = DateTime.now();
+    final nowFormatted =
+        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+
+    final continuousDuration = _getContinuousDriveDuration(route);
+    final cHours = continuousDuration.inHours;
+    final cMins = continuousDuration.inMinutes % 60;
+    final driveTimeFormatted = cHours > 0 ? '${cHours}h ${cMins}m' : '$cMins min';
+    final isDriveAlert = continuousDuration.inMinutes >= _coffeeReminderMinutes;
+
+    final dates = _availableDates;
+
+    // Ustalanie bieżącego celu HUD
+    PassengerStop? currentStop;
+    int currentStopIndex = 0;
+
+    if (route.stops.isNotEmpty) {
+      if (_hudManualStopIndex != null &&
+          _hudManualStopIndex! >= 0 &&
+          _hudManualStopIndex! < route.stops.length) {
+        currentStopIndex = _hudManualStopIndex!;
+        currentStop = route.stops[currentStopIndex];
+      } else {
+        // Domyślnie: pierwszy ze statusem "Oczekuje" (etap odbioru), lub pierwszy niedostarczony
+        final pending = route.stops.where((s) => s.status == PickupStatus.pending).toList();
+        if (pending.isNotEmpty) {
+          currentStop = pending.first;
+          currentStopIndex = route.stops.indexOf(currentStop);
+        } else {
+          try {
+            currentStop = route.stops.firstWhere(
+              (s) =>
+                  s.status != PickupStatus.delivered &&
+                  s.status != PickupStatus.cancelled &&
+                  s.status != PickupStatus.noShow,
+            );
+            currentStopIndex = route.stops.indexOf(currentStop);
+          } catch (_) {
+            currentStop = route.stops.last;
+            currentStopIndex = route.stops.length - 1;
+          }
+        }
+      }
+    }
+
+    // Wyznaczanie etapu (Odbiór vs Dowóz) i adresu docelowego dla aktywnego przystanku
+    String phaseLabel = '';
+    Color phaseColor = const Color(0xFFFF9800);
+    IconData phaseIcon = Icons.directions_bus;
+    String targetAddress = '';
+    String plannedTime = '--:--';
+    String hudStreetAndNumber = '';
+    String hudPostalAndCity = '';
+
+    if (currentStop != null) {
+      final isPending = currentStop.status == PickupStatus.pending;
+      if (currentStop.isTransfer) {
+        phaseLabel = 'PUNKT PRZESIADKOWY';
+        phaseColor = const Color(0xFFE67E22);
+        phaseIcon = Icons.sync_alt;
+        targetAddress = currentStop.address;
+        plannedTime = currentStop.homeTimeDisplay;
+        hudStreetAndNumber = currentStop.address;
+        hudPostalAndCity = 'Punkt Przesiadkowy (Szczecin)';
+      } else if (isPLtoDE) {
+        // Sobota (Wywóz: PL ➔ DE)
+        if (isPending) {
+          // Odbiór z hotelu w Polsce
+          phaseLabel = 'ODBIÓR Z HOTELU';
+          phaseColor = const Color(0xFF27AE60);
+          phaseIcon = Icons.hotel_rounded;
+          final h = HotelDirectoryService.getCachedHotel(currentStop.resort);
+          targetAddress = (h != null && h.fullAddress.isNotEmpty) ? h.fullAddress : currentStop.resort;
+          plannedTime = currentStop.hotelTime ?? '--:--';
+          hudStreetAndNumber = (h != null && h.address.isNotEmpty) ? h.address : currentStop.resort;
+          final cityPart = (h != null && h.city.isNotEmpty) ? h.city : 'Kołobrzeg';
+          hudPostalAndCity = '$cityPart • ${currentStop.resort}';
+        } else {
+          // Dostawa pod adres domowy w Niemczech
+          phaseLabel = 'DOWÓZ POD ADRES (DE)';
+          phaseColor = const Color(0xFF1976D2);
+          phaseIcon = Icons.home_rounded;
+          targetAddress = currentStop.address;
+          plannedTime = currentStop.homeTimeDisplay;
+          _parseAddressComponents(currentStop.address, (street, postalCity) {
+            hudStreetAndNumber = street;
+            hudPostalAndCity = postalCity;
+          });
+        }
+      } else {
+        // Niedziela (Przywóz: DE ➔ PL)
+        if (isPending) {
+          // Odbiór z adresu domowego w Niemczech
+          phaseLabel = 'ODBIÓR Z ADRESU (DE)';
+          phaseColor = const Color(0xFF27AE60);
+          phaseIcon = Icons.home_rounded;
+          targetAddress = currentStop.address;
+          plannedTime = currentStop.homeTimeDisplay;
+          _parseAddressComponents(currentStop.address, (street, postalCity) {
+            hudStreetAndNumber = street;
+            hudPostalAndCity = postalCity;
+          });
+        } else {
+          // Dostawa do hotelu w Polsce
+          phaseLabel = 'DOWÓZ DO HOTELU (PL)';
+          phaseColor = const Color(0xFF1976D2);
+          phaseIcon = Icons.hotel_rounded;
+          final h = HotelDirectoryService.getCachedHotel(currentStop.resort);
+          targetAddress = (h != null && h.fullAddress.isNotEmpty) ? h.fullAddress : currentStop.resort;
+          plannedTime = currentStop.hotelTime ?? '--:--';
+          hudStreetAndNumber = (h != null && h.address.isNotEmpty) ? h.address : currentStop.resort;
+          final cityPart = (h != null && h.city.isNotEmpty) ? h.city : 'Kołobrzeg';
+          hudPostalAndCity = '$cityPart • ${currentStop.resort}';
+        }
+      }
+
+      // Zabezpieczenie: jeśli na dole wylądował tylko sam kod (np. "06618"), a miasto zostało przy adresie (np. "Naumburg, Gartenstr. 29")
+      if (RegExp(r'^\d{4,5}$|^\d{2}-\d{3}$').hasMatch(hudPostalAndCity.trim())) {
+        if (hudStreetAndNumber.contains(',')) {
+          final commaParts = hudStreetAndNumber.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+          if (commaParts.length >= 2) {
+            final city = commaParts[0];
+            hudStreetAndNumber = commaParts.sublist(1).join(', ');
+            hudPostalAndCity = '${hudPostalAndCity.trim()} $city';
+          }
+        } else {
+          final spaceMatch = RegExp(r'^([^\d,]+)\s+(.+)$').firstMatch(hudStreetAndNumber.trim());
+          if (spaceMatch != null) {
+            final city = spaceMatch.group(1)!.trim();
+            hudStreetAndNumber = spaceMatch.group(2)!.trim();
+            hudPostalAndCity = '${hudPostalAndCity.trim()} $city';
+          }
+        }
+      }
+    }
+
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // 1. TOP BAR HUD (Zegar, czas jazdy, przełącznik powrotu)
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  // Duży cyfrowy zegar
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.access_time_filled, color: Color(0xFFFF9800), size: 20),
+                      const SizedBox(width: 6),
+                      Text(
+                        nowFormatted,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 24,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 1.0,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(width: 14),
+                  // Wskaźnik ciągłej jazdy
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: isDriveAlert
+                          ? const Color(0xFFC10801).withValues(alpha: 0.35)
+                          : const Color(0xFF1F180E),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: isDriveAlert ? const Color(0xFFFF5252) : const Color(0xFFFFB74D),
+                        width: 1.1,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.coffee_rounded,
+                          size: 14,
+                          color: isDriveAlert ? const Color(0xFFFF5252) : const Color(0xFFFFB74D),
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          driveTimeFormatted,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: isDriveAlert ? const Color(0xFFFF8A80) : const Color(0xFFFFCC80),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Spacer(),
+                  // Przycisk powrotu do widoku normalnego
+                  OutlinedButton.icon(
+                    key: const ValueKey('hud_exit_button'),
+                    style: OutlinedButton.styleFrom(
+                      backgroundColor: const Color(0xFF1E1E1E),
+                      foregroundColor: Colors.white,
+                      side: const BorderSide(color: Colors.white54, width: 1.2),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      visualDensity: VisualDensity.compact,
+                      minimumSize: const Size(0, 34),
+                    ),
+                    onPressed: () {
+                      setState(() {
+                        _isNightHudMode = false;
+                      });
+                    },
+                    icon: const Icon(Icons.close_rounded, size: 16, color: Colors.white),
+                    label: const Text(
+                      'NORMALNY',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+
+              // 2. Przełącznik Dnia (Sobota / Niedziela) w trybie HUD
+              if (dates.length > 1) ...[
+                Row(
+                  children: [
+                    Expanded(
+                      child: InkWell(
+                        onTap: () {
+                          if (_selectedDate != dates[0]) {
+                            setState(() {
+                              _selectedDate = dates[0];
+                              _hudManualStopIndex = null;
+                            });
+                          }
+                        },
+                        borderRadius: BorderRadius.circular(8),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 6),
+                          decoration: BoxDecoration(
+                            color: _selectedDate == dates[0]
+                                ? const Color(0xFF2E2210)
+                                : const Color(0xFF121212),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: _selectedDate == dates[0]
+                                  ? const Color(0xFFFF9800)
+                                  : Colors.white12,
+                              width: 1.2,
+                            ),
+                          ),
+                          alignment: Alignment.center,
+                          child: Text(
+                            'Sobota (${_shortDate(dates[0])})',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.bold,
+                              color: _selectedDate == dates[0]
+                                  ? const Color(0xFFFF9800)
+                                  : Colors.white54,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: InkWell(
+                        onTap: () {
+                          if (_selectedDate != dates[1]) {
+                            setState(() {
+                              _selectedDate = dates[1];
+                              _hudManualStopIndex = null;
+                            });
+                          }
+                        },
+                        borderRadius: BorderRadius.circular(8),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 6),
+                          decoration: BoxDecoration(
+                            color: _selectedDate == dates[1]
+                                ? const Color(0xFF2E2210)
+                                : const Color(0xFF121212),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: _selectedDate == dates[1]
+                                  ? const Color(0xFFFF9800)
+                                  : Colors.white12,
+                              width: 1.2,
+                            ),
+                          ),
+                          alignment: Alignment.center,
+                          child: Text(
+                            'Niedziela (${_shortDate(dates[1])})',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.bold,
+                              color: _selectedDate == dates[1]
+                                  ? const Color(0xFFFF9800)
+                                  : Colors.white54,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+              ],
+
+              // 3. GŁÓWNA KARTA HUD (BIEŻĄCY CEL)
+              Expanded(
+                child: currentStop == null
+                    ? const Center(
+                        child: Text(
+                          'Brak przystanków na tej trasie',
+                          style: TextStyle(color: Colors.white54, fontSize: 16),
+                        ),
+                      )
+                    : Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF0F0F0F),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: phaseColor.withValues(alpha: 0.65),
+                            width: 1.5,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: phaseColor.withValues(alpha: 0.12),
+                              blurRadius: 16,
+                              spreadRadius: 1,
+                            ),
+                          ],
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            // Pasek etapu i numeru przystanku
+                            Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: phaseColor.withValues(alpha: 0.20),
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(
+                                      color: phaseColor.withValues(alpha: 0.60),
+                                      width: 1.0,
+                                    ),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(phaseIcon, size: 14, color: phaseColor),
+                                      const SizedBox(width: 5),
+                                      Text(
+                                        phaseLabel,
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.bold,
+                                          letterSpacing: 0.5,
+                                          color: phaseColor,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const Spacer(),
+                                Text(
+                                  'Punkt ${currentStopIndex + 1} z ${route.stops.length}',
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.white60,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const Spacer(flex: 1),
+
+                            // WIELKA GODZINA
+                            Center(
+                              child: Column(
+                                children: [
+                                  Text(
+                                    plannedTime,
+                                    style: const TextStyle(
+                                      fontSize: 48,
+                                      fontWeight: FontWeight.w900,
+                                      color: Color(0xFFFF9800),
+                                      letterSpacing: 1.5,
+                                      fontFamily: 'monospace',
+                                    ),
+                                  ),
+                                  const Text(
+                                    'PLANOWANA GODZINA',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                      letterSpacing: 1.5,
+                                      color: Colors.white38,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const Spacer(flex: 1),
+
+                            // 1. IMIĘ I NAZWISKO (na samej górze sekcji, do 2 linijek jeśli długie)
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Padding(
+                                  padding: EdgeInsets.only(top: 2),
+                                  child: Icon(Icons.person_rounded, size: 22, color: Color(0xFFFFB74D)),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    currentStop.name,
+                                    style: const TextStyle(
+                                      fontSize: 21,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.white,
+                                      letterSpacing: 0.2,
+                                      height: 1.2,
+                                    ),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 2),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withValues(alpha: 0.15),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Text(
+                                      '${currentStop.passengerCount} os.',
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+
+                            // 2. ADRES Z NUMEREM (powyżej kodu i miasta)
+                            Text(
+                              hudStreetAndNumber.isNotEmpty ? hudStreetAndNumber : currentStop.address,
+                              style: const TextStyle(
+                                fontSize: 26,
+                                fontWeight: FontWeight.w900,
+                                color: Colors.white,
+                                height: 1.15,
+                                letterSpacing: 0.3,
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 5),
+
+                            // 3. KOD POCZTOWY I MIASTO W JEDNEJ LINII
+                            if (hudPostalAndCity.isNotEmpty) ...[
+                              Row(
+                                children: [
+                                  const Icon(Icons.location_on, size: 19, color: Color(0xFFFF9800)),
+                                  const SizedBox(width: 5),
+                                  Expanded(
+                                    child: Text(
+                                      hudPostalAndCity,
+                                      style: const TextStyle(
+                                        fontSize: 20,
+                                        fontWeight: FontWeight.bold,
+                                        color: Color(0xFFFFCC80),
+                                        letterSpacing: 0.3,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+
+                            // UWAGI (np. pulsujący Rollator)
+                            if (currentStop.comment.isNotEmpty) ...[
+                              const SizedBox(height: 8),
+                              _PulsingCommentBadge(
+                                comment: currentStop.comment,
+                                isHero: true,
+                              ),
+                            ],
+                            const Spacer(flex: 2),
+
+                            // DUŻY PRZYCISK NAWIGACJI GOOGLE MAPS
+                            SizedBox(
+                              height: 50,
+                              child: FilledButton.icon(
+                                key: const ValueKey('hud_navigate_button'),
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: const Color(0xFF1976D2),
+                                  foregroundColor: Colors.white,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  elevation: 2,
+                                ),
+                                onPressed: () {
+                                  if (targetAddress.isNotEmpty) {
+                                    LauncherService.openNavigation(context, targetAddress);
+                                  } else {
+                                    _showNotice('Brak adresu do nawigacji', Icons.warning, Colors.amber);
+                                  }
+                                },
+                                icon: const Icon(Icons.navigation_rounded, size: 24),
+                                label: const Text(
+                                  'NAWIGUJ (GOOGLE MAPS)',
+                                  style: TextStyle(
+                                    fontSize: 15.5,
+                                    fontWeight: FontWeight.bold,
+                                    letterSpacing: 0.5,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+
+                            // PRZYCISK TELEFONU (jeśli jest numer)
+                            if (currentStop.phone.isNotEmpty) ...[
+                              SizedBox(
+                                height: 42,
+                                child: FilledButton.icon(
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: const Color(0xFF2E7D32),
+                                    foregroundColor: Colors.white,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                  ),
+                                  onPressed: () {
+                                    LauncherService.openPhone(
+                                      context,
+                                      currentStop!.phone,
+                                      currentStop.name,
+                                    );
+                                  },
+                                  icon: const Icon(Icons.phone, size: 18),
+                                  label: Text(
+                                    'ZADZWOŃ (${currentStop.phone})',
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                            ],
+
+                            // 3 PRZYCISKI STATUSU: ODEBRANY | DOSTARCZONY | PRZESIADKA
+                            Row(
+                              children: [
+                                // 1. ODEBRANY
+                                Expanded(
+                                  child: SizedBox(
+                                    height: 44,
+                                    child: FilledButton.icon(
+                                      style: FilledButton.styleFrom(
+                                        backgroundColor: currentStop.status == PickupStatus.pickedUp
+                                            ? const Color(0xFF27AE60)
+                                            : const Color(0xFF1B4332),
+                                        foregroundColor: Colors.white,
+                                        side: BorderSide(
+                                          color: currentStop.status == PickupStatus.pickedUp
+                                              ? const Color(0xFF52B788)
+                                              : const Color(0xFF2D6A4F),
+                                          width: currentStop.status == PickupStatus.pickedUp ? 1.5 : 1.1,
+                                        ),
+                                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(10),
+                                        ),
+                                      ),
+                                      onPressed: () {
+                                        _updatePassengerStatus(currentStop!, PickupStatus.pickedUp);
+                                        _showNotice('Pasażer oznaczony: Odebrany', Icons.check_circle, const Color(0xFF27AE60));
+                                        setState(() {
+                                          _hudManualStopIndex = null;
+                                        });
+                                      },
+                                      icon: Icon(
+                                        currentStop.status == PickupStatus.pickedUp
+                                            ? Icons.check_circle_rounded
+                                            : Icons.check,
+                                        size: 16,
+                                      ),
+                                      label: const Text(
+                                        'Odebrany',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+
+                                // 2. DOSTARCZONY
+                                Expanded(
+                                  child: SizedBox(
+                                    height: 44,
+                                    child: FilledButton.icon(
+                                      style: FilledButton.styleFrom(
+                                        backgroundColor: currentStop.status == PickupStatus.delivered && !currentStop.isTransfer
+                                            ? const Color(0xFF1976D2)
+                                            : const Color(0xFF0F2B48),
+                                        foregroundColor: Colors.white,
+                                        side: BorderSide(
+                                          color: currentStop.status == PickupStatus.delivered && !currentStop.isTransfer
+                                              ? const Color(0xFF64B5F6)
+                                              : const Color(0xFF1E5B8E),
+                                          width: currentStop.status == PickupStatus.delivered && !currentStop.isTransfer ? 1.5 : 1.1,
+                                        ),
+                                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(10),
+                                        ),
+                                      ),
+                                      onPressed: () {
+                                        _updatePassengerStatus(currentStop!, PickupStatus.delivered);
+                                        _showNotice('Pasażer oznaczony: Dostarczony', Icons.home, const Color(0xFF64B5F6));
+                                        setState(() {
+                                          _hudManualStopIndex = null;
+                                        });
+                                      },
+                                      icon: Icon(
+                                        currentStop.status == PickupStatus.delivered && !currentStop.isTransfer
+                                            ? Icons.check_circle_rounded
+                                            : Icons.home,
+                                        size: 16,
+                                      ),
+                                      label: const Text(
+                                        'Dostarczony',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+
+                                // 3. PRZESIADKA
+                                Expanded(
+                                  child: SizedBox(
+                                    height: 44,
+                                    child: FilledButton.icon(
+                                      key: const ValueKey('hud_transfer_button'),
+                                      style: FilledButton.styleFrom(
+                                        backgroundColor: currentStop.isTransfer
+                                            ? const Color(0xFFE67E22)
+                                            : const Color(0xFF2E241D),
+                                        foregroundColor: Colors.white,
+                                        side: BorderSide(
+                                          color: currentStop.isTransfer
+                                              ? const Color(0xFFFFB74D)
+                                              : const Color(0xFF6E401F),
+                                          width: currentStop.isTransfer ? 1.5 : 1.1,
+                                        ),
+                                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(10),
+                                        ),
+                                      ),
+                                      onPressed: () {
+                                        _updatePassengerStatus(currentStop!, PickupStatus.delivered);
+                                        _showNotice('Pasażer oznaczony jako przesiadka', Icons.sync_alt, const Color(0xFFE67E22));
+                                        setState(() {
+                                          _hudManualStopIndex = null;
+                                        });
+                                      },
+                                      icon: const Icon(Icons.sync_alt, size: 16),
+                                      label: const Text(
+                                        'Przesiadka',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+              ),
+              const SizedBox(height: 8),
+
+              // 4. DOLNA BELKA NAWIGACJI MIĘDZY PRZYSTANKAMI (< Poprzedni | Następny >)
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white70,
+                      side: const BorderSide(color: Colors.white24),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    ),
+                    onPressed: currentStopIndex > 0
+                        ? () {
+                            setState(() {
+                              _hudManualStopIndex = currentStopIndex - 1;
+                            });
+                          }
+                        : null,
+                    icon: const Icon(Icons.arrow_back_ios_rounded, size: 14),
+                    label: const Text('Poprzedni', style: TextStyle(fontSize: 12)),
+                  ),
+                  if (_hudManualStopIndex != null)
+                    TextButton(
+                      onPressed: () {
+                        setState(() {
+                          _hudManualStopIndex = null;
+                        });
+                      },
+                      child: const Text(
+                        'Bieżący cel ↺',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Color(0xFFFF9800),
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    )
+                  else
+                    const Text(
+                      'Bieżący cel trasy',
+                      style: TextStyle(fontSize: 11, color: Colors.white38),
+                    ),
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white70,
+                      side: const BorderSide(color: Colors.white24),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    ),
+                    onPressed: currentStopIndex < route.stops.length - 1
+                        ? () {
+                            setState(() {
+                              _hudManualStopIndex = currentStopIndex + 1;
+                            });
+                          }
+                        : null,
+                    icon: const Text('Następny', style: TextStyle(fontSize: 12)),
+                    label: const Icon(Icons.arrow_forward_ios_rounded, size: 14),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _parseAddressComponents(
+    String rawAddress,
+    void Function(String streetAndNumber, String postalAndCity) onParsed,
+  ) {
+    final clean = rawAddress.trim();
+    if (clean.isEmpty) {
+      onParsed('', '');
+      return;
+    }
+
+    // 1. Sprawdzamy podział po przecinkach
+    if (clean.contains(',')) {
+      final parts = clean.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+
+      // Przypadek 3 lub więcej części, np. ["06618", "Naumburg", "Gartenstr. 29"] lub ["Gartenstr. 29", "06618", "Naumburg"]
+      if (parts.length >= 3) {
+        final postalIdx = parts.indexWhere((p) => RegExp(r'^\d{4,5}$|^\d{2}-\d{3}$').hasMatch(p));
+        if (postalIdx != -1) {
+          final postal = parts[postalIdx];
+          int cityIdx = -1;
+          if (postalIdx + 1 < parts.length && !RegExp(r'\d').hasMatch(parts[postalIdx + 1])) {
+            cityIdx = postalIdx + 1;
+          } else if (postalIdx - 1 >= 0 && !RegExp(r'\d').hasMatch(parts[postalIdx - 1])) {
+            cityIdx = postalIdx - 1;
+          } else {
+            cityIdx = parts.indexWhere((p) => p != postal && !RegExp(r'\d').hasMatch(p));
+          }
+
+          if (cityIdx != -1) {
+            final city = parts[cityIdx];
+            final streetParts = <String>[];
+            for (int i = 0; i < parts.length; i++) {
+              if (i != postalIdx && i != cityIdx) {
+                streetParts.add(parts[i]);
+              }
+            }
+            final street = streetParts.join(', ');
+            onParsed(street, '$postal $city');
+            return;
+          }
+        }
+      }
+
+      // Przypadek 2 części, np. ["06618 Naumburg", "Gartenstr. 29"] lub ["06618", "Naumburg Gartenstr. 29"]
+      if (parts.length == 2) {
+        final p0 = parts[0];
+        final p1 = parts[1];
+
+        // p0 to sam kod: "06618", p1 to "Naumburg Gartenstr. 29"
+        if (RegExp(r'^\d{4,5}$|^\d{2}-\d{3}$').hasMatch(p0)) {
+          final subMatch = RegExp(r'^([^\d,]+)\s+(.+)$').firstMatch(p1);
+          if (subMatch != null) {
+            onParsed(subMatch.group(2)!.trim(), '$p0 ${subMatch.group(1)!.trim()}');
+            return;
+          }
+        }
+
+        // p1 to sam kod: "06618", p0 to "Naumburg Gartenstr. 29"
+        if (RegExp(r'^\d{4,5}$|^\d{2}-\d{3}$').hasMatch(p1)) {
+          final subMatch = RegExp(r'^([^\d,]+)\s+(.+)$').firstMatch(p0);
+          if (subMatch != null) {
+            onParsed(subMatch.group(2)!.trim(), '$p1 ${subMatch.group(1)!.trim()}');
+            return;
+          }
+        }
+
+        // p0 zaczyna się od kodu i ma miasto: "06618 Naumburg"
+        if (RegExp(r'^\d{4,5}\s+|^(\d{2}-\d{3})\s+').hasMatch(p0)) {
+          onParsed(p1, p0);
+          return;
+        }
+
+        // p1 zaczyna się od kodu i ma miasto: "06618 Naumburg"
+        if (RegExp(r'^\d{4,5}\s+|^(\d{2}-\d{3})\s+').hasMatch(p1)) {
+          onParsed(p0, p1);
+          return;
+        }
+
+        onParsed(p1, p0);
+        return;
+      }
+    }
+
+    // Bez przecinków, np. "06618 Naumburg Gartenstr. 29"
+    final fullMatch = RegExp(r'^(\d{4,5}|\d{2}-\d{3})\s+([^\d,]+?)\s+([A-Za-zäöüßÄÖÜ].*\d+.*)$').firstMatch(clean);
+    if (fullMatch != null) {
+      onParsed(fullMatch.group(3)!.trim(), '${fullMatch.group(1)!.trim()} ${fullMatch.group(2)!.trim()}');
+      return;
+    }
+
+    // Fallback gdy kod pocztowy znajduje się w tekście
+    final zipMatch = RegExp(r'\b(\d{5}|\d{2}-\d{3})\b').firstMatch(clean);
+    if (zipMatch != null) {
+      final zip = zipMatch.group(0)!;
+      final remaining = clean.replaceFirst(zip, '').trim();
+      final subParts = remaining.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+      if (subParts.length >= 2) {
+        onParsed(subParts[1], '$zip ${subParts[0]}');
+        return;
+      }
+    }
+
+    onParsed(clean, '');
   }
 
   // TAB 1: TANKOWANIE
@@ -2906,22 +4103,45 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                       ),
                     ],
                   ),
-                  OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.white,
-                      side: BorderSide(
-                        color: _isDark ? const Color(0xFF554D44) : AppColors.brandingOrange,
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.white,
+                          side: BorderSide(
+                            color: _isDark ? const Color(0xFF554D44) : AppColors.brandingOrange,
+                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        icon: Icon(
+                          Icons.add,
+                          size: 14,
+                          color: _isDark ? const Color(0xFFFFE7D0) : AppColors.brandingOrange,
+                        ),
+                        label: const Text('Wpłata', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                        onPressed: () => _showAddGuestPaymentDialog(() => setState(() {})),
                       ),
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      visualDensity: VisualDensity.compact,
-                    ),
-                    icon: Icon(
-                      Icons.edit,
-                      size: 14,
-                      color: _isDark ? const Color(0xFFFFE7D0) : AppColors.brandingOrange,
-                    ),
-                    label: const Text('Edytuj', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
-                    onPressed: () => _showEditFinancialsDialog(() => setState(() {})),
+                      const SizedBox(width: 6),
+                      OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.white,
+                          side: BorderSide(
+                            color: _isDark ? const Color(0xFF554D44) : AppColors.brandingOrange,
+                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        icon: Icon(
+                          Icons.edit,
+                          size: 14,
+                          color: _isDark ? const Color(0xFFFFE7D0) : AppColors.brandingOrange,
+                        ),
+                        label: const Text('Edytuj', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                        onPressed: () => _showEditFinancialsDialog(() => setState(() {})),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -2934,42 +4154,158 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                   border: Border.all(color: _borderColor),
                 ),
                 child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('ZALICZKA:', style: TextStyle(fontSize: 11, color: Colors.white60)),
-                        const SizedBox(height: 3),
-                        Text(
-                          '${summary.advanceEur.toStringAsFixed(2)} €',
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white),
-                        ),
-                        Text(
-                          '${summary.advancePln.toStringAsFixed(2)} zł',
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white),
-                        ),
-                      ],
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('ZALICZKA:', style: TextStyle(fontSize: 10.5, color: Colors.white60)),
+                          const SizedBox(height: 3),
+                          Text(
+                            '${summary.advanceEur.toStringAsFixed(2)} €',
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5, color: Colors.white),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          Text(
+                            '${summary.advancePln.toStringAsFixed(2)} zł',
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5, color: Colors.white),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
                     ),
                     Container(height: 36, width: 1, color: Colors.white12),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('ODEBRANE:', style: TextStyle(fontSize: 11, color: Colors.white60)),
-                        const SizedBox(height: 3),
-                        Text(
-                          '${summary.cashCollectedEur.toStringAsFixed(2)} €',
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.greenAccent),
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('RESZTA EUR:', style: TextStyle(fontSize: 10.5, color: Colors.white60)),
+                            const SizedBox(height: 3),
+                            Text(
+                              '${summary.remainingAdvanceEur.toStringAsFixed(2)} €',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13.5,
+                                color: summary.remainingAdvanceEur >= 0
+                                    ? const Color(0xFF52B788)
+                                    : const Color(0xFFFF8A80),
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            Text(
+                              'wydano: ${summary.totalExpensesEur.toStringAsFixed(2)} €',
+                              style: const TextStyle(fontSize: 10.5, color: Colors.white54),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
                         ),
-                        Text(
-                          '${summary.cashCollectedPln.toStringAsFixed(2)} zł',
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.greenAccent),
-                        ),
-                      ],
+                      ),
+                    ),
+                    Container(height: 36, width: 1, color: Colors.white12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('ODEBRANE:', style: TextStyle(fontSize: 10.5, color: Colors.white60)),
+                          const SizedBox(height: 3),
+                          Text(
+                            '${summary.cashCollectedEur.toStringAsFixed(2)} €',
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5, color: Colors.greenAccent),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          Text(
+                            '${summary.cashCollectedPln.toStringAsFixed(2)} zł',
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5, color: Colors.greenAccent),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
               ),
+              if (_guestPayments.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.20),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: _borderColor),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(Icons.receipt_long, size: 14, color: AppColors.brandingOrange),
+                              const SizedBox(width: 6),
+                              Text(
+                                'WPŁATY OD GOŚCI (${_guestPayments.length}):',
+                                style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Colors.white70),
+                              ),
+                            ],
+                          ),
+                          InkWell(
+                            onTap: () => _showAddGuestPaymentDialog(() => setState(() {})),
+                            child: const Padding(
+                              padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                              child: Row(
+                                children: [
+                                  Icon(Icons.add, size: 13, color: AppColors.brandingOrange),
+                                  SizedBox(width: 2),
+                                  Text('Dodaj', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.brandingOrange)),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      ..._guestPayments.map((p) => Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.05),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.person_outline, size: 14, color: Colors.white70),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Text(
+                                      p.passengerName.isNotEmpty ? p.passengerName : 'Gość / pasażer',
+                                      style: const TextStyle(fontSize: 11.5, color: Colors.white, fontWeight: FontWeight.w500),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  Text(
+                                    '${p.amount.toStringAsFixed(2)} ${p.currency}',
+                                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF52B788)),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  InkWell(
+                                    onTap: () => _deleteGuestPayment(p),
+                                    child: const Padding(
+                                      padding: EdgeInsets.all(2),
+                                      child: Icon(Icons.close, size: 14, color: Colors.white38),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          )),
+                    ],
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -3014,20 +4350,8 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                 icon: Icons.description_outlined,
                 accentColor: Colors.blueAccent,
                 title: 'Zapisz raport Word (.docx)',
-                subtitle: 'Generuje oficjalny plik rozliczenia zgodny ze wzorcem',
-                onTap: () => DocxReportService.savePlanJazdyDocxToDesktop(context, summary),
-              ),
-              const SizedBox(height: 8),
-              // Wyślij WhatsApp
-              _buildReportActionRow(
-                icon: Icons.chat_outlined,
-                accentColor: const Color(0xFF25D366),
-                title: 'Wyślij raport na WhatsApp',
-                subtitle: 'Prześlij tekstowe podsumowanie kursu na czat firmowy',
-                onTap: () {
-                  final text = ReportService.generatePlanJazdyText(summary);
-                  ReportService.sendViaWhatsApp(context, text);
-                },
+                subtitle: 'Zapisuje oficjalny plik rozliczenia w pamięci telefonu',
+                onTap: () => DocxReportService.savePlanJazdyDocx(context, summary),
               ),
               const Divider(height: 24, color: Colors.white12),
               // Zakończ kurs
@@ -3507,195 +4831,116 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
         color: Colors.transparent,
         borderRadius: BorderRadius.circular(14),
         child: Padding(
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // 1. Nazwa hotelu + ikona hotelu + menu opcji
               Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  CircleAvatar(
-                    radius: 16,
-                    backgroundColor: _isDark
-                        ? Colors.white.withValues(alpha: 0.08)
-                        : Colors.black.withValues(alpha: 0.05),
+                  const SizedBox(
+                    width: 20,
                     child: Icon(
                       Icons.hotel_rounded,
                       size: 18,
-                      color: _isDark ? AppColors.activeTheme.secondaryAccent : _textSecondary,
+                      color: AppColors.brandingOrange,
                     ),
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 8),
                   Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          hotel.name,
-                          style: TextStyle(
-                            fontSize: 15.5,
-                            fontWeight: FontWeight.bold,
-                            color: _textPrimary,
+                    child: Text(
+                      hotel.name,
+                      style: TextStyle(
+                        fontSize: 15.5,
+                        fontWeight: FontWeight.bold,
+                        color: _textPrimary,
+                        letterSpacing: 0.2,
+                      ),
+                    ),
+                  ),
+                  SizedBox(
+                    width: 28,
+                    height: 28,
+                    child: PopupMenuButton<String>(
+                      tooltip: 'Opcje hotelu',
+                      padding: EdgeInsets.zero,
+                      icon: const Icon(Icons.more_vert, size: 19, color: AppColors.gray),
+                      onSelected: (val) {
+                        if (val == 'edit') {
+                          _showEditHotelDialog(hotel: hotel);
+                        } else if (val == 'delete') {
+                          _confirmDeleteHotel(hotel);
+                        }
+                      },
+                      itemBuilder: (context) => [
+                        const PopupMenuItem(
+                          value: 'edit',
+                          child: Row(
+                            children: [
+                              Icon(Icons.edit_outlined, size: 18),
+                              SizedBox(width: 8),
+                              Text('Edytuj dane'),
+                            ],
                           ),
                         ),
-                        const SizedBox(height: 3),
-                        Wrap(
-                          spacing: 6,
-                          children: [
-                            _buildBrandBadge(
-                              hotel.city,
-                              _isDark ? AppColors.activeTheme.secondaryAccent : _textSecondary,
-                            ),
-                            if (hotel.fromList)
-                              _buildBrandBadge(
-                                'Z listy przejazdu',
-                                const Color(0xFFE67300),
-                              ),
-                          ],
+                        const PopupMenuItem(
+                          value: 'delete',
+                          child: Row(
+                            children: [
+                              Icon(Icons.delete_outline, size: 18, color: Colors.redAccent),
+                              SizedBox(width: 8),
+                              Text('Usuń z bazy', style: TextStyle(color: Colors.redAccent)),
+                            ],
+                          ),
                         ),
                       ],
                     ),
                   ),
-                  PopupMenuButton<String>(
-                    tooltip: 'Opcje hotelu',
-                    icon: const Icon(Icons.more_vert, size: 20, color: AppColors.gray),
-                    onSelected: (val) {
-                      if (val == 'edit') {
-                        _showEditHotelDialog(hotel: hotel);
-                      } else if (val == 'delete') {
-                        _confirmDeleteHotel(hotel);
-                      }
-                    },
-                    itemBuilder: (context) => [
-                      const PopupMenuItem(
-                        value: 'edit',
-                        child: Row(
-                          children: [
-                            Icon(Icons.edit_outlined, size: 18),
-                            SizedBox(width: 8),
-                            Text('Edytuj dane'),
-                          ],
-                        ),
-                      ),
-                      const PopupMenuItem(
-                        value: 'delete',
-                        child: Row(
-                          children: [
-                            Icon(Icons.delete_outline, size: 18, color: Colors.redAccent),
-                            SizedBox(width: 8),
-                            Text('Usuń z bazy', style: TextStyle(color: Colors.redAccent)),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
                 ],
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 7),
 
-              // Adres
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Icon(Icons.location_on_outlined, size: 16, color: AppColors.gray),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      hotel.fullAddress,
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: _textSecondary,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-
-              // Wskazówka / Uwagi
-              if (hotel.note != null && hotel.note!.isNotEmpty) ...[
-                const SizedBox(height: 6),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: _isDark ? Colors.white.withValues(alpha: 0.04) : Colors.black.withValues(alpha: 0.03),
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: _borderColor.withValues(alpha: 0.5)),
-                  ),
+              // 2. Adres (kliknięcie odpala nawigację, idealnie w linii z nazwą)
+              InkWell(
+                onTap: () {
+                  final navTarget = hotel.address.isNotEmpty
+                      ? hotel.fullAddress
+                      : '${hotel.name}, ${hotel.city}';
+                  LauncherService.openNavigation(context, navTarget);
+                },
+                borderRadius: BorderRadius.circular(6),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
                   child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(
-                        Icons.info_outline,
-                        size: 13,
-                        color: _isDark ? AppColors.activeTheme.secondaryAccent : _textSecondary,
+                      const SizedBox(
+                        width: 20,
+                        child: Padding(
+                          padding: EdgeInsets.only(top: 1),
+                          child: Icon(
+                            Icons.location_on_outlined,
+                            size: 17,
+                            color: AppColors.gray,
+                          ),
+                        ),
                       ),
-                      const SizedBox(width: 6),
+                      const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          hotel.note!,
-                          style: TextStyle(fontSize: 11.5, color: _textSecondary),
+                          hotel.fullAddress,
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: _textSecondary,
+                            fontWeight: FontWeight.w500,
+                            height: 1.25,
+                          ),
                         ),
                       ),
                     ],
                   ),
                 ),
-              ],
-
-              const SizedBox(height: 10),
-
-              // Przyciski akcji: Nawiguj w Google Maps + Edytuj
-              Row(
-                children: [
-                  Expanded(
-                    child: FilledButton.icon(
-                      style: FilledButton.styleFrom(
-                        backgroundColor: _isDark ? const Color(0xFF5A391E) : const Color(0xFFE67300),
-                        foregroundColor: _isDark ? const Color(0xFFFFF1E3) : Colors.white,
-                        side: BorderSide(
-                          color: _isDark ? const Color(0xFFD48B47) : const Color(0xFFB35900),
-                          width: 1.2,
-                        ),
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        visualDensity: VisualDensity.compact,
-                      ),
-                      onPressed: () {
-                        final navTarget = hotel.address.isNotEmpty
-                            ? hotel.fullAddress
-                            : '${hotel.name}, ${hotel.city}';
-                        LauncherService.openNavigation(context, navTarget);
-                      },
-                      icon: Icon(
-                        Icons.near_me_rounded,
-                        size: 16,
-                        color: _isDark ? const Color(0xFFFFD4A8) : Colors.white,
-                      ),
-                      label: const Text(
-                        'Nawiguj (Google Maps)',
-                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: _isDark ? const Color(0xFFDCD6CE) : _textPrimary,
-                      backgroundColor: _isDark ? const Color(0xFF262422) : Colors.black.withValues(alpha: 0.03),
-                      side: BorderSide(
-                        color: _isDark ? const Color(0xFF6B6258) : _borderColor,
-                        width: 1.1,
-                      ),
-                      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
-                      visualDensity: VisualDensity.compact,
-                    ),
-                    onPressed: () => _showEditHotelDialog(hotel: hotel),
-                    icon: Icon(
-                      Icons.edit_outlined,
-                      size: 16,
-                      color: _isDark ? const Color(0xFFFFD4A8) : _textSecondary,
-                    ),
-                    label: const Text('Edytuj', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                  ),
-                ],
               ),
             ],
           ),
@@ -3998,6 +5243,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
       color: Colors.transparent,
       child: InkWell(
         onTap: () => _handleBreakPillTap(route),
+        onLongPress: () => _showCoffeeReminderSettingsDialog(route),
         borderRadius: BorderRadius.circular(12),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 180),
@@ -4033,6 +5279,343 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Duration _getContinuousDriveDuration(BusRoute route) {
+    if (route.activeBreak != null) {
+      return Duration.zero;
+    }
+    DateTime? start = _driveStartTime;
+    if (start == null) {
+      final finishedBreaks = route.breaks.where((b) => !b.isActive && b.endTime != null).toList();
+      if (finishedBreaks.isNotEmpty) {
+        finishedBreaks.sort((a, b) => a.endTime!.compareTo(b.endTime!));
+        start = finishedBreaks.last.endTime;
+      }
+    }
+    if (start == null) {
+      final firstPickup = route.stops
+          .where((s) => s.pickedUpAt != null)
+          .map((s) => s.pickedUpAt!)
+          .fold<DateTime?>(null, (min, dt) => min == null || dt.isBefore(min) ? dt : min);
+      start = firstPickup;
+    }
+    if (start != null) {
+      final diff = DateTime.now().difference(start);
+      return diff.isNegative ? Duration.zero : diff;
+    }
+    return Duration.zero;
+  }
+
+  bool _shouldShowCoffeeReminder(BusRoute route) {
+    if (route.activeBreak != null) return false;
+    if (_coffeeBreakSnoozeUntil != null && DateTime.now().isBefore(_coffeeBreakSnoozeUntil!)) {
+      return false;
+    }
+    final driveDuration = _getContinuousDriveDuration(route);
+    return driveDuration.inMinutes >= _coffeeReminderMinutes;
+  }
+
+  Widget _buildCoffeeBreakReminderBanner(BusRoute route) {
+    final duration = _getContinuousDriveDuration(route);
+    final hours = duration.inHours;
+    final minutes = duration.inMinutes % 60;
+    final timeFormatted = hours > 0 ? '${hours}h ${minutes}min' : '$minutes min';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: _isDark
+              ? [const Color(0xFF1F180E), const Color(0xFF130E07)]
+              : [const Color(0xFFFFF8E1), const Color(0xFFFFECB3)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: _isDark
+              ? const Color(0xFFFFB74D).withValues(alpha: 0.65)
+              : const Color(0xFFFFA000).withValues(alpha: 0.70),
+          width: 1.3,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: _isDark ? const Color(0xFFFFB74D).withValues(alpha: 0.08) : Colors.black12,
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: _isDark ? const Color(0xFF2E2210) : const Color(0xFFFFE082),
+                  border: Border.all(
+                    color: _isDark ? const Color(0xFFFFA726) : const Color(0xFFFF8F00),
+                    width: 1.3,
+                  ),
+                ),
+                child: const Icon(
+                  Icons.coffee_rounded,
+                  size: 20,
+                  color: Color(0xFFFFB74D),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          '☕ Czas na przerwę i kawę!',
+                          style: TextStyle(
+                            fontSize: 14.5,
+                            fontWeight: FontWeight.bold,
+                            color: _isDark ? const Color(0xFFFFCC80) : const Color(0xFF5D4037),
+                            letterSpacing: 0.2,
+                          ),
+                        ),
+                        const Spacer(),
+                        InkWell(
+                          onTap: () {
+                            setState(() {
+                              _coffeeBreakSnoozeUntil = DateTime.now().add(const Duration(minutes: 30));
+                            });
+                            _showNotice('Przypomnienie o kawie wyciszone na 30 min', Icons.notifications_off, const Color(0xFFFFA726));
+                          },
+                          borderRadius: BorderRadius.circular(16),
+                          child: Padding(
+                            padding: const EdgeInsets.all(4),
+                            child: Icon(
+                              Icons.close,
+                              size: 16,
+                              color: _isDark ? Colors.white60 : Colors.black54,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Prowadzisz już $timeFormatted bez przerwy. Zadbaj o chwilę odpoczynku dla bezpieczeństwa.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: _isDark ? Colors.white70 : Colors.black87,
+                        height: 1.25,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              // Przycisk "Zrób przerwę"
+              Expanded(
+                flex: 6,
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFFE68A00),
+                    foregroundColor: Colors.white,
+                    side: const BorderSide(color: Color(0xFFFFB74D), width: 1.2),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                    visualDensity: VisualDensity.compact,
+                    minimumSize: const Size(0, 36),
+                  ),
+                  onPressed: () {
+                    _handleBreakPillTap(route);
+                  },
+                  icon: const Icon(Icons.coffee, size: 16),
+                  label: const Text(
+                    'Zrób przerwę',
+                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              // Przycisk "Za 15 min"
+              Expanded(
+                flex: 5,
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _isDark ? const Color(0xFFFFCC80) : const Color(0xFF5D4037),
+                    backgroundColor: _isDark ? const Color(0xFF261D12) : Colors.white60,
+                    side: BorderSide(
+                      color: _isDark ? const Color(0xFFFFB74D).withValues(alpha: 0.50) : Colors.grey.shade400,
+                      width: 1.1,
+                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+                    visualDensity: VisualDensity.compact,
+                    minimumSize: const Size(0, 36),
+                  ),
+                  onPressed: () {
+                    setState(() {
+                      _coffeeBreakSnoozeUntil = DateTime.now().add(const Duration(minutes: 15));
+                    });
+                    _showNotice('Przypomnienie o kawie odłożone o 15 minut', Icons.snooze, const Color(0xFFFFA726));
+                  },
+                  icon: const Icon(Icons.alarm, size: 15),
+                  label: const Text(
+                    'Za 15 min',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showCoffeeReminderSettingsDialog(BusRoute route) {
+    final continuousDuration = _getContinuousDriveDuration(route);
+    final hours = continuousDuration.inHours;
+    final minutes = continuousDuration.inMinutes % 60;
+    final timeStr = hours > 0 ? '${hours}h ${minutes}m' : '$minutes min';
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          backgroundColor: const Color(0xFF1E1E1E),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: const BorderSide(color: Color(0xFF383838)),
+          ),
+          title: const Row(
+            children: [
+              Icon(Icons.coffee_rounded, color: Color(0xFFFFD4A8), size: 22),
+              SizedBox(width: 8),
+              Text(
+                'Przypomnienie o kawie',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.black38,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.white12),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.timer_outlined, size: 16, color: Color(0xFFFFD4A8)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Bieżący czas ciągłej jazdy: $timeStr',
+                        style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Colors.white70),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                'Przypomnij po czasie ciągłej jazdy:',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.gray),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                children: [
+                  ChoiceChip(
+                    label: const Text('2 godz.'),
+                    selected: _coffeeReminderMinutes == 120,
+                    onSelected: (sel) async {
+                      if (sel) {
+                        setState(() => _coffeeReminderMinutes = 120);
+                        setDialogState(() {});
+                        await StorageService.saveCoffeeReminderMinutes(120);
+                      }
+                    },
+                  ),
+                  ChoiceChip(
+                    label: const Text('2,5 godz. (zalecane)'),
+                    selected: _coffeeReminderMinutes == 150,
+                    onSelected: (sel) async {
+                      if (sel) {
+                        setState(() => _coffeeReminderMinutes = 150);
+                        setDialogState(() {});
+                        await StorageService.saveCoffeeReminderMinutes(150);
+                      }
+                    },
+                  ),
+                  ChoiceChip(
+                    label: const Text('3 godz.'),
+                    selected: _coffeeReminderMinutes == 180,
+                    onSelected: (sel) async {
+                      if (sel) {
+                        setState(() => _coffeeReminderMinutes = 180);
+                        setDialogState(() {});
+                        await StorageService.saveCoffeeReminderMinutes(180);
+                      }
+                    },
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              const Divider(color: Colors.white12),
+              const SizedBox(height: 6),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFFFFD4A8),
+                    side: const BorderSide(color: Color(0xFF8D4F1E)),
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                  ),
+                  onPressed: () {
+                    setState(() {
+                      _driveStartTime = DateTime.now().subtract(Duration(minutes: _coffeeReminderMinutes + 5));
+                      _coffeeBreakSnoozeUntil = null;
+                    });
+                    Navigator.pop(ctx);
+                    _showNotice(
+                      'Uruchomiono test: zasymulowano ${_coffeeReminderMinutes + 5} min jazdy!',
+                      Icons.coffee_rounded,
+                      const Color(0xFFD48B47),
+                    );
+                  },
+                  icon: const Icon(Icons.play_circle_outline, size: 16),
+                  label: const Text(
+                    'Symuluj 2,5h jazdy (test komunikatu)',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Gotowe'),
+            ),
+          ],
         ),
       ),
     );
@@ -4395,7 +5978,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
         statusIcon = Icons.check_circle;
         break;
       case PickupStatus.delivered:
-        statusColor = _isDark ? const Color(0xFF9E9E9E) : const Color(0xFF757575);
+        statusColor = _isDark ? const Color(0xFF64B5F6) : const Color(0xFF1976D2);
         final timeStr = stop.deliveredAt != null ? ' (${_formatTime(stop.deliveredAt!)})' : '';
         statusText = 'Dostarczony$timeStr';
         statusIcon = Icons.home;
@@ -4611,7 +6194,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                                         fontWeight: FontWeight.w900,
                                         color: isDelivered
                                             ? (_isDark ? Colors.white54 : Colors.grey.shade600)
-                                            : (isPLtoDE ? const Color(0xFF27AE60) : _textPrimary),
+                                            : const Color(0xFF27AE60),
                                         letterSpacing: 0.5,
                                       ),
                                     ),
@@ -4642,7 +6225,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
         ),
       );
     } else {
-      // Widok rozwiniętej karty
+      // Widok rozwiniętej karty (spójny z kartą aktywnego pasażera)
       cardWidget = Container(
         margin: const EdgeInsets.symmetric(vertical: 6),
         decoration: _convexDecoration(
@@ -4659,561 +6242,703 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
               ? (_isDark ? const Color(0xFF1A1A1A) : Colors.grey.shade100)
               : null,
         ),
-        child: Material(
-          color: Colors.transparent,
-          borderRadius: BorderRadius.circular(14),
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // RZĄD GÓRNY: Numerek przystanku + Imię i nazwisko + liczba osób + okrągłe przyciski (słuchawka, nawigacja) + zwinięcie
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    CircleAvatar(
-                      radius: 14,
-                      backgroundColor: isDelivered
-                          ? (_isDark ? Colors.white24 : Colors.grey)
-                          : (_isDark ? AppColors.activeTheme.primaryAccent : AppColors.primary),
-                      child: Text(
-                        '${stop.order}',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
+                CircleAvatar(
+                  radius: 13,
+                  backgroundColor: isDelivered
+                      ? (_isDark ? Colors.white24 : Colors.grey)
+                      : (_isDark ? AppColors.activeTheme.primaryAccent : AppColors.primary),
+                  child: Text(
+                    '${stop.order}',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
                     ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            stop.name,
-                            style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.bold,
-                              color: isDelivered
-                                  ? (_isDark ? Colors.white60 : Colors.black54)
-                                  : _textPrimary,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Wrap(
-                            spacing: 6,
-                            runSpacing: 4,
-                            children: [
-                              _buildBrandBadge('${stop.passengerCount} os.', _textSecondary),
-                              if (stop.office.isNotEmpty)
-                                _buildBrandBadge(stop.office, AppColors.gray),
-                              if (stop.resort.isNotEmpty)
-                                _buildBrandBadge(
-                                  isPLtoDE ? '🏨 ${stop.resort}' : '🏨 Cel: ${stop.resort}',
-                                  isDelivered
-                                      ? (_isDark ? Colors.white54 : Colors.grey)
-                                      : AppColors.brandingOrange,
-                                ),
-                              if (stop.comment.isNotEmpty)
-                                _buildBrandBadge('⚠️ ${stop.comment}', const Color(0xFFC10801)),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                    PopupMenuButton<PickupStatus>(
-                      initialValue: stop.status,
-                      tooltip: 'Zmień status',
-                      onSelected: (newStatus) => _updatePassengerStatus(stop, newStatus),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: statusColor.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: statusColor.withValues(alpha: 0.4)),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(statusIcon, size: 14, color: statusColor),
-                            const SizedBox(width: 4),
-                            Text(
-                              statusText,
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                                color: statusColor,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      itemBuilder: (context) => [
-                        const PopupMenuItem(
-                          value: PickupStatus.pending,
-                          child: Text('⏳ Oczekuje'),
-                        ),
-                        const PopupMenuItem(
-                          value: PickupStatus.pickedUp,
-                          child: Text('📥 Odebrany (zapisz czas)'),
-                        ),
-                        const PopupMenuItem(
-                          value: PickupStatus.delivered,
-                          child: Text('🏠 Dostarczony (zapisz czas)'),
-                        ),
-                        const PopupMenuItem(
-                          value: PickupStatus.noShow,
-                          child: Text('❌ Nieobecny'),
-                        ),
-                        const PopupMenuItem(
-                          value: PickupStatus.cancelled,
-                          child: Text('🚫 Odwołany'),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(width: 4),
-                    InkWell(
-                      onTap: () => _togglePassengerCollapse(stop),
-                      child: const Padding(
-                        padding: EdgeInsets.all(4),
-                        child: Icon(Icons.expand_less, size: 20, color: AppColors.gray),
-                      ),
-                    ),
-                  ],
-                ),
-                Divider(height: 16, color: _borderColor),
-
-                // Adres domowy
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(
-                      stop.isTransfer ? Icons.sync_alt_rounded : Icons.home_rounded,
-                      size: 16,
-                      color: isDelivered
-                          ? (_isDark ? Colors.white38 : Colors.grey)
-                          : (stop.isTransfer ? const Color(0xFFE67E22) : AppColors.brandingOrange),
-                    ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        'Dom: ${stop.displayAddress}',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: stop.isTransfer ? FontWeight.w600 : FontWeight.normal,
-                          color: isDelivered
-                              ? (_isDark ? Colors.white54 : Colors.black45)
-                              : (stop.isTransfer ? const Color(0xFFFFE7D0) : _textSecondary),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-
-                // Adres hotelu (jeśli przypisany)
-                if (stop.resort.isNotEmpty) ...[
-                  const SizedBox(height: 5),
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Icon(
-                        Icons.hotel_rounded,
-                        size: 16,
-                        color: isDelivered
-                            ? (_isDark ? Colors.white38 : Colors.grey)
-                            : (_isDark ? AppColors.activeTheme.secondaryAccent : _textSecondary),
-                      ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 1),
-                          child: RichText(
-                            text: TextSpan(
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: isDelivered
-                                    ? (_isDark ? Colors.white54 : Colors.black45)
-                                    : _textSecondary,
-                              ),
-                              children: [
-                                TextSpan(
-                                  text: 'Hotel: ${stop.resort}',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    color: isDelivered
-                                        ? (_isDark ? Colors.white60 : Colors.black54)
-                                        : _textPrimary,
-                                  ),
-                                ),
-                                if (hotelInfo != null && hotelInfo.fullAddress.isNotEmpty) ...[
-                                  TextSpan(
-                                    text: ' • ${hotelInfo.fullAddress}',
-                                    style: TextStyle(
-                                      color: isDelivered
-                                          ? (_isDark ? Colors.white38 : Colors.grey)
-                                          : (_isDark ? Colors.white70 : Colors.black87),
-                                    ),
-                                  ),
-                                ] else ...[
-                                  const TextSpan(
-                                    text: ' • (brak adresu w bazie)',
-                                    style: TextStyle(
-                                      color: AppColors.gray,
-                                      fontStyle: FontStyle.italic,
-                                      fontSize: 11.5,
-                                    ),
-                                  ),
-                                ],
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
                   ),
-                ],
-
-                // Zarejestrowane czasy jeśli istnieją
-                if (stop.pickedUpAt != null || stop.deliveredAt != null) ...[
-                  const SizedBox(height: 6),
-                  Row(
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Row(
                     children: [
-                      const SizedBox(width: 22),
-                      if (stop.pickedUpAt != null)
-                        Text(
-                          'Odebrano: ${_formatTime(stop.pickedUpAt!)} ',
+                      Flexible(
+                        child: Text(
+                          stop.name,
                           style: TextStyle(
-                            fontSize: 11,
-                            color: isDelivered ? Colors.grey : const Color(0xFF27AE60),
-                            fontWeight: FontWeight.w600,
+                            fontSize: 17,
+                            fontWeight: FontWeight.bold,
+                            color: isDelivered
+                                ? (_isDark ? Colors.white60 : Colors.black54)
+                                : _textPrimary,
                           ),
+                          overflow: TextOverflow.ellipsis,
                         ),
-                      if (stop.deliveredAt != null)
-                        Text(
-                          '• Dostarczono: ${_formatTime(stop.deliveredAt!)}',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: isDelivered ? Colors.grey : const Color(0xFF1E824C),
-                            fontWeight: FontWeight.w600,
+                      ),
+                      if (stop.passengerCount > 1) ...[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.black45,
+                            borderRadius: BorderRadius.circular(5),
+                            border: Border.all(color: Colors.amber.withValues(alpha: 0.5), width: 1),
                           ),
-                        ),
-                    ],
-                  ),
-                ],
-
-                // Harmonogram godzin (odjazd i dojazd)
-                if (stop.hotelTime != null || stop.homeTime != null) ...[
-                  const SizedBox(height: 10),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: _isDark
-                          ? Colors.white.withValues(alpha: 0.04)
-                          : Colors.black.withValues(alpha: 0.03),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: _borderColor.withValues(alpha: 0.6)),
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Row(
-                            children: [
-                              Icon(
-                                isPLtoDE ? Icons.hotel_rounded : Icons.home_rounded,
-                                size: 15,
-                                color: AppColors.brandingOrange,
-                              ),
-                              const SizedBox(width: 6),
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    isPLtoDE ? 'ODJAZD Z HOTELU' : 'ODBIÓR Z DOMU',
-                                    style: const TextStyle(
-                                      fontSize: 9,
-                                      fontWeight: FontWeight.bold,
-                                      color: AppColors.gray,
-                                    ),
-                                  ),
-                                  Text(
-                                    (isPLtoDE ? stop.hotelTime : stop.homeTimeDisplay) ?? '--:--',
-                                    style: TextStyle(
-                                      fontSize: 17,
-                                      fontWeight: FontWeight.w900,
-                                      color: _textPrimary,
-                                      letterSpacing: 0.5,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                        Icon(
-                          Icons.arrow_forward_rounded,
-                          size: 18,
-                          color: AppColors.gray.withValues(alpha: 0.6),
-                        ),
-                        Expanded(
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.end,
-                            children: [
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.end,
-                                children: [
-                                  Text(
-                                    isPLtoDE ? 'DOJAZD DO DOMU' : 'DOJAZD DO HOTELU',
-                                    style: const TextStyle(
-                                      fontSize: 9,
-                                      fontWeight: FontWeight.bold,
-                                      color: AppColors.gray,
-                                    ),
-                                  ),
-                                  Text(
-                                    (isPLtoDE ? stop.homeTimeDisplay : stop.hotelTime) ?? '--:--',
-                                    style: TextStyle(
-                                      fontSize: 17,
-                                      fontWeight: FontWeight.w900,
-                                      color: isPLtoDE ? const Color(0xFF27AE60) : _textPrimary,
-                                      letterSpacing: 0.5,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(width: 6),
-                              Icon(
-                                isPLtoDE ? Icons.home_rounded : Icons.hotel_rounded,
-                                size: 15,
-                                color: const Color(0xFF27AE60),
-                              ),
-                            ],
+                          child: Text(
+                            '${stop.passengerCount}',
+                            style: const TextStyle(fontSize: 12, color: Colors.amber, fontWeight: FontWeight.bold),
                           ),
                         ),
                       ],
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                if (stop.phone.isNotEmpty) ...[
+                  IconButton(
+                    style: IconButton.styleFrom(
+                      shape: const CircleBorder(),
+                      backgroundColor: Colors.green.withValues(alpha: 0.20),
+                      side: BorderSide(color: Colors.greenAccent.withValues(alpha: 0.55), width: 1.2),
+                      minimumSize: const Size(36, 36),
+                      padding: EdgeInsets.zero,
+                    ),
+                    icon: const Icon(Icons.phone, size: 19, color: Colors.greenAccent),
+                    tooltip: 'Zadzwoń (${stop.phone})',
+                    onPressed: () => LauncherService.openPhone(
+                      context,
+                      stop.phone,
+                      stop.name,
                     ),
                   ),
+                  const SizedBox(width: 6),
                 ],
-
-                const SizedBox(height: 10),
-
-                // Przyciski akcji: Telefon i Nawigacja (Dom / Hotel)
-                if (stop.resort.isNotEmpty) ...[
-                  Row(
-                    children: [
-                      Expanded(
-                        flex: 3,
-                        child: OutlinedButton.icon(
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: _isDark ? const Color(0xFFDCD6CE) : _textPrimary,
-                            backgroundColor: _isDark ? const Color(0xFF262422) : Colors.black.withValues(alpha: 0.03),
-                            side: BorderSide(
-                              color: _isDark ? const Color(0xFF6B6258) : _borderColor,
-                              width: 1.1,
-                            ),
-                            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-                            visualDensity: VisualDensity.compact,
-                          ),
-                          onPressed: stop.phone.isNotEmpty
-                              ? () => LauncherService.openPhone(
-                                    context,
-                                    stop.phone,
-                                    stop.name,
-                                  )
-                              : null,
-                          icon: Icon(
-                            Icons.phone,
-                            size: 15,
-                            color: _isDark ? const Color(0xFFFFD4A8) : AppColors.brandingOrange,
-                          ),
-                          label: Text(
-                            stop.phone.isNotEmpty ? stop.phone : 'Tel.',
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        flex: 4,
-                        child: Builder(
-                          builder: (context) {
-                            final isHomeActive = (!isPLtoDE && stop.status == PickupStatus.pending) ||
-                                (isPLtoDE && stop.status != PickupStatus.pending);
-
-                            // Aktywny cel trasy: ciepły bursztynowo-miedziany akcent z elegancką ramką
-                            // Cel alternatywny/drugi etap: szlachetny ciemny grafit/brąz z wyraźnym obrysem
-                            final activeBg = _isDark ? const Color(0xFF5A391E) : const Color(0xFFE67300);
-                            final activeFg = _isDark ? const Color(0xFFFFF1E3) : Colors.white;
-                            final activeBorder = _isDark ? const Color(0xFFD48B47) : const Color(0xFFB35900);
-
-                            final secondaryBg = _isDark ? const Color(0xFF272422) : Colors.white;
-                            final secondaryFg = _isDark ? const Color(0xFFE4DDD5) : _textPrimary;
-                            final secondaryBorder = _isDark ? const Color(0xFF5E544A) : _borderColor;
-
-                            return FilledButton.icon(
-                              style: FilledButton.styleFrom(
-                                backgroundColor: isDelivered
-                                    ? (_isDark ? const Color(0xFF1F1D1B) : Colors.grey.shade300)
-                                    : (isHomeActive ? activeBg : secondaryBg),
-                                foregroundColor: isDelivered
-                                    ? (_isDark ? Colors.white38 : Colors.grey)
-                                    : (isHomeActive ? activeFg : secondaryFg),
-                                side: BorderSide(
-                                  color: isDelivered
-                                      ? Colors.transparent
-                                      : (isHomeActive ? activeBorder : secondaryBorder),
-                                  width: 1.2,
-                                ),
-                                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-                                visualDensity: VisualDensity.compact,
-                              ),
-                              onPressed: (stop.address.isNotEmpty && !stop.isTransfer)
-                                  ? () => LauncherService.openNavigation(
-                                        context,
-                                        stop.address,
-                                      )
-                                  : null,
-                              icon: Icon(
-                                Icons.home_rounded,
-                                size: 15,
-                                color: isDelivered
-                                    ? Colors.grey
-                                    : (isHomeActive
-                                        ? (_isDark ? const Color(0xFFFFD4A8) : Colors.white)
-                                        : (_isDark ? const Color(0xFFC8BFB5) : _textSecondary)),
-                              ),
-                              label: const Text(
-                                'Dom',
-                                style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold),
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        flex: 4,
-                        child: Builder(
-                          builder: (context) {
-                            final isHotelActive = (isPLtoDE && stop.status == PickupStatus.pending) ||
-                                (!isPLtoDE && stop.status != PickupStatus.pending);
-
-                            // Aktywny cel trasy: ciepły bursztynowo-miedziany akcent z elegancką ramką
-                            // Cel alternatywny/drugi etap: szlachetny ciemny grafit/brąz z wyraźnym obrysem
-                            final activeBg = _isDark ? const Color(0xFF5A391E) : const Color(0xFFE67300);
-                            final activeFg = _isDark ? const Color(0xFFFFF1E3) : Colors.white;
-                            final activeBorder = _isDark ? const Color(0xFFD48B47) : const Color(0xFFB35900);
-
-                            final secondaryBg = _isDark ? const Color(0xFF272422) : Colors.white;
-                            final secondaryFg = _isDark ? const Color(0xFFE4DDD5) : _textPrimary;
-                            final secondaryBorder = _isDark ? const Color(0xFF5E544A) : _borderColor;
-
-                            return FilledButton.icon(
-                              style: FilledButton.styleFrom(
-                                backgroundColor: isDelivered
-                                    ? (_isDark ? const Color(0xFF1F1D1B) : Colors.grey.shade300)
-                                    : (isHotelActive ? activeBg : secondaryBg),
-                                foregroundColor: isDelivered
-                                    ? (_isDark ? Colors.white38 : Colors.grey)
-                                    : (isHotelActive ? activeFg : secondaryFg),
-                                side: BorderSide(
-                                  color: isDelivered
-                                      ? Colors.transparent
-                                      : (isHotelActive ? activeBorder : secondaryBorder),
-                                  width: 1.2,
-                                ),
-                                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-                                visualDensity: VisualDensity.compact,
-                              ),
-                              onPressed: () {
-                                if (hotelInfo != null && hotelInfo.address.isNotEmpty) {
-                                  LauncherService.openNavigation(context, hotelInfo.fullAddress);
-                                } else {
-                                  // Jeśli brak dokładnego adresu ulicy, nawiguj do miejscowości i nazwy hotelu (Google Maps sam go znajdzie)
-                                  final searchTarget = hotelInfo != null && hotelInfo.city.isNotEmpty
-                                      ? '${stop.resort}, ${hotelInfo.city}'
-                                      : stop.resort;
-                                  LauncherService.openNavigation(context, searchTarget);
-                                }
-                              },
-                              icon: Icon(
-                                Icons.hotel_rounded,
-                                size: 15,
-                                color: isDelivered
-                                    ? Colors.grey
-                                    : (isHotelActive
-                                        ? (_isDark ? const Color(0xFFFFD4A8) : Colors.white)
-                                        : (_isDark ? const Color(0xFFC8BFB5) : _textSecondary)),
-                              ),
-                              label: const Text(
-                                'Hotel',
-                                style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold),
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                    ],
+                IconButton(
+                  style: IconButton.styleFrom(
+                    shape: const CircleBorder(),
+                    backgroundColor: AppColors.brandingOrange.withValues(alpha: 0.20),
+                    side: BorderSide(color: AppColors.brandingOrange.withValues(alpha: 0.55), width: 1.2),
+                    minimumSize: const Size(36, 36),
+                    padding: EdgeInsets.zero,
                   ),
-                ] else ...[
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: _textSecondary,
-                            side: BorderSide(color: _borderColor),
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            visualDensity: VisualDensity.compact,
-                          ),
-                          onPressed: stop.phone.isNotEmpty
-                              ? () => LauncherService.openPhone(
-                                    context,
-                                    stop.phone,
-                                    stop.name,
-                                  )
-                              : null,
-                          icon: const Icon(Icons.phone, size: 16),
-                          label: Text(
-                            stop.phone.isNotEmpty ? stop.phone : 'Brak tel.',
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontSize: 12),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: FilledButton.icon(
-                          style: FilledButton.styleFrom(
-                            backgroundColor: isDelivered
-                                ? (_isDark ? const Color(0xFF2C2C2C) : Colors.grey)
-                                : AppColors.brandingOrange,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            visualDensity: VisualDensity.compact,
-                          ),
-                          onPressed: (stop.address.isNotEmpty && !stop.isTransfer)
-                              ? () => LauncherService.openNavigation(
-                                    context,
-                                    stop.address,
-                                  )
-                              : null,
-                          icon: const Icon(Icons.near_me, size: 16),
-                          label: const Text(
-                            'Nawiguj',
-                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
+                  icon: const Icon(Icons.navigation, size: 19, color: AppColors.brandingOrange),
+                  tooltip: 'Nawiguj do celu',
+                  onPressed: () {
+                    if (!isPLtoDE && stop.resort.isNotEmpty) {
+                      final h = HotelDirectoryService.getCachedHotel(stop.resort);
+                      if (h != null && h.fullAddress.isNotEmpty) {
+                        LauncherService.openNavigation(context, h.fullAddress);
+                      } else {
+                        _showNotice(
+                          'Brak adresu hotelu ${stop.resort}. Uzupełnij w zakładce Hotele.',
+                          Icons.info_outline,
+                          Colors.amber,
+                        );
+                      }
+                    } else {
+                      LauncherService.openNavigation(
+                        context,
+                        stop.address,
+                      );
+                    }
+                  },
+                ),
+                const SizedBox(width: 4),
+                IconButton(
+                  icon: const Icon(Icons.expand_less, size: 22, color: AppColors.gray),
+                  tooltip: 'Zwiń szczegóły',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  onPressed: () => _togglePassengerCollapse(stop),
+                ),
               ],
             ),
+            const SizedBox(height: 10),
+
+            // Szczegóły trasy i godzin (czarny boks)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.35),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.white12, width: 1.1),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (isPLtoDE) ...[
+                    // 1. Odbiór z hotelu + Nazwa hotelu + Godzina odbioru
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(7),
+                          decoration: BoxDecoration(
+                            color: Colors.amber.withValues(alpha: 0.18),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Icon(Icons.hotel_rounded, size: 20, color: Colors.amber),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'ODBIÓR Z HOTELU',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 0.5,
+                                  color: AppColors.gray,
+                                ),
+                              ),
+                              const SizedBox(height: 1),
+                              Text(
+                                stop.resort.isNotEmpty ? stop.resort : 'Hotel w Polsce',
+                                style: const TextStyle(
+                                  fontSize: 14.5,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white,
+                                ),
+                              ),
+                              if (stop.resort.isNotEmpty) ...[
+                                Builder(
+                                  builder: (context) {
+                                    final h = HotelDirectoryService.getCachedHotel(stop.resort);
+                                    final addr = h != null && h.fullAddress.isNotEmpty
+                                        ? h.fullAddress
+                                        : '(brak zapisanego adresu)';
+                                    return Text(
+                                      addr,
+                                      style: TextStyle(
+                                        fontSize: 11.5,
+                                        color: Colors.white.withValues(alpha: 0.75),
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    );
+                                  },
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: _isDark ? const Color(0xFF2C2A28) : Colors.amber.withValues(alpha: 0.18),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: _isDark
+                                  ? const Color(0xFFFFE7D0).withValues(alpha: 0.40)
+                                  : Colors.amber.withValues(alpha: 0.45),
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.access_time_filled,
+                                size: 13,
+                                color: _isDark ? const Color(0xFFFFE7D0) : Colors.amber,
+                              ),
+                              const SizedBox(width: 5),
+                              Text(
+                                stop.hotelTime ?? '--:--',
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.bold,
+                                  color: _isDark ? const Color(0xFFFFE7D0) : Colors.amber,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 8),
+                      child: Divider(height: 1, color: Colors.white12),
+                    ),
+
+                    // 2. Adres domowy (Niemcy)
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(7),
+                          decoration: BoxDecoration(
+                            color: AppColors.brandingOrange.withValues(alpha: 0.18),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Icon(Icons.home_rounded, size: 20, color: AppColors.brandingOrange),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'ADRES DOMOWY (NIEMCY)',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 0.5,
+                                  color: AppColors.gray,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                stop.displayAddress,
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.white,
+                                  height: 1.25,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 8),
+                      child: Divider(height: 1, color: Colors.white12),
+                    ),
+
+                    // 3. Planowany dojazd do domu godzina
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(7),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF27AE60).withValues(alpha: 0.18),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Icon(Icons.flag_rounded, size: 20, color: Color(0xFF52B788)),
+                        ),
+                        const SizedBox(width: 10),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'PLANOWANY DOJAZD DO DOMU',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 0.5,
+                                  color: AppColors.gray,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF27AE60).withValues(alpha: 0.22),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFF27AE60).withValues(alpha: 0.5)),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.schedule, size: 14, color: Color(0xFF52B788)),
+                              const SizedBox(width: 5),
+                              Text(
+                                stop.homeTimeDisplay,
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF52B788),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ] else ...[
+                    // Niedziela: Odbiór z adresu domowego ➔ Dojazd do hotelu
+                    // 1. Adres domowy + Godzina odbioru z domu
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(7),
+                          decoration: BoxDecoration(
+                            color: AppColors.brandingOrange.withValues(alpha: 0.18),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Icon(Icons.home_rounded, size: 20, color: AppColors.brandingOrange),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'ODBIÓR Z ADRESU DOMOWEGO (NIEMCY)',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 0.5,
+                                  color: AppColors.gray,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                stop.displayAddress,
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.white,
+                                  height: 1.25,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: _isDark ? const Color(0xFF2C2A28) : AppColors.brandingOrange.withValues(alpha: 0.18),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: _isDark
+                                  ? const Color(0xFFFFE7D0).withValues(alpha: 0.40)
+                                  : AppColors.brandingOrange.withValues(alpha: 0.45),
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.access_time_filled,
+                                size: 13,
+                                color: _isDark ? const Color(0xFFFFE7D0) : AppColors.brandingOrange,
+                              ),
+                              const SizedBox(width: 5),
+                              Text(
+                                stop.homeTimeDisplay,
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.bold,
+                                  color: _isDark ? const Color(0xFFFFE7D0) : AppColors.brandingOrange,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 8),
+                      child: Divider(height: 1, color: Colors.white12),
+                    ),
+
+                    // 2. Hotel docelowy w Polsce
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(7),
+                          decoration: BoxDecoration(
+                            color: Colors.blueAccent.withValues(alpha: 0.18),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Icon(Icons.hotel_rounded, size: 20, color: Colors.blueAccent),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'HOTEL DOCELOWY W POLSCE',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 0.5,
+                                  color: AppColors.gray,
+                                ),
+                              ),
+                              const SizedBox(height: 1),
+                              Text(
+                                stop.resort.isNotEmpty ? stop.resort : 'Hotel w Polsce',
+                                style: const TextStyle(
+                                  fontSize: 14.5,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white,
+                                ),
+                              ),
+                              if (stop.resort.isNotEmpty) ...[
+                                Builder(
+                                  builder: (context) {
+                                    final h = HotelDirectoryService.getCachedHotel(stop.resort);
+                                    final addr = h != null && h.fullAddress.isNotEmpty
+                                        ? h.fullAddress
+                                        : '(brak zapisanego adresu)';
+                                    return Text(
+                                      addr,
+                                      style: TextStyle(
+                                        fontSize: 11.5,
+                                        color: Colors.white.withValues(alpha: 0.75),
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    );
+                                  },
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 8),
+                      child: Divider(height: 1, color: Colors.white12),
+                    ),
+
+                    // 3. Planowany dojazd do hotelu
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(7),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF27AE60).withValues(alpha: 0.18),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Icon(Icons.flag_rounded, size: 20, color: Color(0xFF52B788)),
+                        ),
+                        const SizedBox(width: 10),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'PLANOWANY DOJAZD DO HOTELU',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 0.5,
+                                  color: AppColors.gray,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF27AE60).withValues(alpha: 0.22),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFF27AE60).withValues(alpha: 0.5)),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.schedule, size: 14, color: Color(0xFF52B788)),
+                              const SizedBox(width: 5),
+                              Text(
+                                stop.hotelTime ?? '--:--',
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF52B788),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+
+          if (stop.pickedUpAt != null || stop.deliveredAt != null) ...[
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                const SizedBox(width: 4),
+                if (stop.pickedUpAt != null)
+                  Text(
+                    'Odebrano: ${_formatTime(stop.pickedUpAt!)} ',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: Color(0xFF27AE60),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                if (stop.deliveredAt != null)
+                  Text(
+                    '• Dostarczono: ${_formatTime(stop.deliveredAt!)}',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: Color(0xFF1E824C),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+              ],
+            ),
+          ],
+
+          // Pod planowany dojazd: 3 przyciski statusu (Odebrany, Dostarczony, Przesiadka)
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              // 1. ODEBRANY
+              Expanded(
+                child: FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: stop.status == PickupStatus.pickedUp
+                        ? const Color(0xFF27AE60)
+                        : (_isDark ? const Color(0xFF1B4332) : const Color(0xFFE8F5E9)),
+                    foregroundColor: stop.status == PickupStatus.pickedUp
+                        ? Colors.white
+                        : (_isDark ? Colors.white : const Color(0xFF1B5E20)),
+                    side: BorderSide(
+                      color: stop.status == PickupStatus.pickedUp
+                          ? const Color(0xFF52B788)
+                          : (_isDark ? const Color(0xFF2D6A4F) : const Color(0xFF81C784)),
+                      width: stop.status == PickupStatus.pickedUp ? 1.5 : 1.2,
+                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+                    visualDensity: VisualDensity.compact,
+                    minimumSize: const Size(0, 36),
+                  ),
+                  onPressed: () {
+                    _updatePassengerStatus(stop, PickupStatus.pickedUp);
+                  },
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        stop.status == PickupStatus.pickedUp
+                            ? Icons.check_circle_rounded
+                            : Icons.check,
+                        size: 14,
+                      ),
+                      const SizedBox(width: 4),
+                      const Text(
+                        'Odebrany',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+
+              // 2. DOSTARCZONY
+              Expanded(
+                child: FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: stop.status == PickupStatus.delivered
+                        ? const Color(0xFF1976D2)
+                        : (_isDark ? const Color(0xFF0F2B48) : const Color(0xFFE3F2FD)),
+                    foregroundColor: stop.status == PickupStatus.delivered
+                        ? Colors.white
+                        : (_isDark ? Colors.white : const Color(0xFF0D47A1)),
+                    side: BorderSide(
+                      color: stop.status == PickupStatus.delivered
+                          ? const Color(0xFF64B5F6)
+                          : (_isDark ? const Color(0xFF1E5B8E) : const Color(0xFF90CAF9)),
+                      width: stop.status == PickupStatus.delivered ? 1.5 : 1.2,
+                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+                    visualDensity: VisualDensity.compact,
+                    minimumSize: const Size(0, 36),
+                  ),
+                  onPressed: () {
+                    _updatePassengerStatus(stop, PickupStatus.delivered);
+                  },
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        stop.status == PickupStatus.delivered
+                            ? Icons.check_circle_rounded
+                            : Icons.home,
+                        size: 14,
+                      ),
+                      const SizedBox(width: 4),
+                      const Text(
+                        'Dostarczony',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+
+              // 3. PRZESIADKA
+              Expanded(
+                child: FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: stop.isTransfer
+                        ? const Color(0xFFE67E22)
+                        : (_isDark ? const Color(0xFF2E241D) : Colors.orange.shade50),
+                    foregroundColor: stop.isTransfer
+                        ? Colors.white
+                        : (_isDark ? const Color(0xFFFFD4A8) : Colors.deepOrange),
+                    side: BorderSide(
+                      color: stop.isTransfer
+                          ? const Color(0xFFB35900)
+                          : const Color(0xFFE67E22).withValues(alpha: 0.5),
+                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+                    visualDensity: VisualDensity.compact,
+                    minimumSize: const Size(0, 36),
+                  ),
+                  onPressed: () {
+                    _updatePassengerStatus(stop, PickupStatus.delivered);
+                    _showNotice('Pasażer oznaczony jako przesiadka', Icons.sync_alt, const Color(0xFFE67E22));
+                  },
+                  child: const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.sync_alt, size: 14),
+                      SizedBox(width: 4),
+                      Text(
+                        'Przesiadka',
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
-        ),
-      );
-    }
+          if (stop.comment.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            _PulsingCommentBadge(
+              comment: stop.comment,
+              isHero: false,
+              animate: !isDelivered,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
 
     if (isDelivered) {
       return Opacity(
@@ -5245,6 +6970,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
 
   @override
   void dispose() {
+    _driveTimeTicker?.cancel();
     _hotelSearchController.dispose();
     _currentNoticeOverlay?.remove();
     _currentNoticeOverlay = null;
@@ -5316,6 +7042,196 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
       advancePln: _advancePln,
       cashCollectedPln: _cashCollectedPln,
       cashCollectedEur: _cashCollectedEur,
+      guestPayments: _guestPayments,
+    );
+  }
+
+  Future<void> _addGuestPayment(GuestPaymentEntry entry, [VoidCallback? onUpdated]) async {
+    setState(() {
+      _guestPayments.add(entry);
+      _cashCollectedPln = _guestPayments.where((p) => p.currency == 'PLN').fold(0.0, (sum, p) => sum + p.amount);
+      _cashCollectedEur = _guestPayments.where((p) => p.currency == 'EUR').fold(0.0, (sum, p) => sum + p.amount);
+    });
+    await StorageService.saveGuestPayments(_currentRoute.code, _guestPayments);
+    await StorageService.saveTripFinancials(
+      busCode: _selectedBusCode,
+      advanceEur: _advanceEur,
+      advancePln: _advancePln,
+      cashCollectedPln: _cashCollectedPln,
+      cashCollectedEur: _cashCollectedEur,
+    );
+    onUpdated?.call();
+  }
+
+  Future<void> _deleteGuestPayment(GuestPaymentEntry entry, [VoidCallback? onUpdated]) async {
+    setState(() {
+      _guestPayments.removeWhere((p) => p.id == entry.id);
+      _cashCollectedPln = _guestPayments.where((p) => p.currency == 'PLN').fold(0.0, (sum, p) => sum + p.amount);
+      _cashCollectedEur = _guestPayments.where((p) => p.currency == 'EUR').fold(0.0, (sum, p) => sum + p.amount);
+    });
+    await StorageService.saveGuestPayments(_currentRoute.code, _guestPayments);
+    await StorageService.saveTripFinancials(
+      busCode: _selectedBusCode,
+      advanceEur: _advanceEur,
+      advancePln: _advancePln,
+      cashCollectedPln: _cashCollectedPln,
+      cashCollectedEur: _cashCollectedEur,
+    );
+    onUpdated?.call();
+  }
+
+  void _showAddGuestPaymentDialog([VoidCallback? onSaved]) {
+    String selectedCurrency = 'PLN';
+    final amountCtrl = TextEditingController();
+    final passengerCtrl = TextEditingController();
+
+    final Set<String> passengerSet = {};
+    for (final s in _currentRoute.stops) {
+      if (s.name.trim().isNotEmpty) passengerSet.add(s.name.trim());
+    }
+    if (_saturdayRoute != null) {
+      for (final s in _saturdayRoute!.stops) {
+        if (s.name.trim().isNotEmpty) passengerSet.add(s.name.trim());
+      }
+    }
+    if (_sundayRoute != null) {
+      for (final s in _sundayRoute!.stops) {
+        if (s.name.trim().isNotEmpty) passengerSet.add(s.name.trim());
+      }
+    }
+    final passengerList = passengerSet.toList()..sort();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          backgroundColor: _cardBg,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(
+            children: [
+              Icon(Icons.payment, color: AppColors.brandingOrange, size: 20),
+              SizedBox(width: 8),
+              Text('Wpłata od gościa', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('WALUTA:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: AppColors.primary)),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    Expanded(
+                      child: ChoiceChip(
+                        label: const Center(child: Text('PLN (zł)', style: TextStyle(fontWeight: FontWeight.bold))),
+                        selected: selectedCurrency == 'PLN',
+                        selectedColor: AppColors.brandingOrange,
+                        labelStyle: TextStyle(
+                          color: selectedCurrency == 'PLN' ? Colors.white : _textPrimary,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        onSelected: (val) {
+                          if (val) setDialogState(() => selectedCurrency = 'PLN');
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: ChoiceChip(
+                        label: const Center(child: Text('EUR (€)', style: TextStyle(fontWeight: FontWeight.bold))),
+                        selected: selectedCurrency == 'EUR',
+                        selectedColor: AppColors.brandingOrange,
+                        labelStyle: TextStyle(
+                          color: selectedCurrency == 'EUR' ? Colors.white : _textPrimary,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        onSelected: (val) {
+                          if (val) setDialogState(() => selectedCurrency = 'EUR');
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: amountCtrl,
+                  autofocus: true,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: InputDecoration(
+                    labelText: 'Kwota wpłaty',
+                    suffixText: selectedCurrency == 'PLN' ? 'zł' : '€',
+                    border: const OutlineInputBorder(),
+                    hintText: 'np. 150.00',
+                  ),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: passengerCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Imię i nazwisko pasażera / opis',
+                    border: OutlineInputBorder(),
+                    hintText: 'np. Jan Kowalski',
+                    prefixIcon: Icon(Icons.person),
+                  ),
+                ),
+                if (passengerList.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  const Text('Wybierz z listy pasażerów:', style: TextStyle(fontSize: 11, color: AppColors.gray, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 6),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 120),
+                    child: SingleChildScrollView(
+                      child: Wrap(
+                        spacing: 6,
+                        runSpacing: 4,
+                        children: passengerList.map((name) => ActionChip(
+                          avatar: const Icon(Icons.add, size: 14),
+                          label: Text(name, style: const TextStyle(fontSize: 11)),
+                          onPressed: () {
+                            setDialogState(() {
+                              passengerCtrl.text = name;
+                            });
+                          },
+                        )).toList(),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Anuluj'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: AppColors.brandingOrange),
+              onPressed: () async {
+                final amount = double.tryParse(amountCtrl.text.replaceAll(',', '.').trim()) ?? 0.0;
+                if (amount <= 0) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Wpisz poprawną kwotę wpłaty')),
+                  );
+                  return;
+                }
+                final entry = GuestPaymentEntry(
+                  id: DateTime.now().millisecondsSinceEpoch.toString(),
+                  amount: amount,
+                  currency: selectedCurrency,
+                  passengerName: passengerCtrl.text.trim(),
+                  timestamp: DateTime.now(),
+                );
+                Navigator.pop(ctx);
+                await _addGuestPayment(entry, onSaved);
+              },
+              child: const Text('Dodaj wpłatę'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -5328,6 +7244,8 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
+        backgroundColor: _cardBg,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Zaliczka i pobrania gotówki', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
         content: SingleChildScrollView(
           child: Column(
@@ -5355,27 +7273,72 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                 ],
               ),
               const SizedBox(height: 14),
-              const Text('ODEBRANE OD GOŚCI:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppColors.primary)),
-              const SizedBox(height: 6),
               Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Expanded(
-                    child: TextField(
-                      controller: cashEurCtrl,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      decoration: const InputDecoration(labelText: 'Odebrane EUR', suffixText: '€', border: OutlineInputBorder()),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: TextField(
-                      controller: cashPlnCtrl,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      decoration: const InputDecoration(labelText: 'Odebrane PLN', suffixText: 'zł', border: OutlineInputBorder()),
-                    ),
-                  ),
+                  const Text('ODEBRANE OD GOŚCI:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppColors.primary)),
+                  if (_guestPayments.isNotEmpty)
+                    Text('${_guestPayments.length} wpłat', style: const TextStyle(fontSize: 11, color: AppColors.gray)),
                 ],
               ),
+              const SizedBox(height: 6),
+              if (_guestPayments.isNotEmpty) ...[
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: _borderColor),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Kwoty wyliczane automatycznie z wpłat gości: ${_cashCollectedEur.toStringAsFixed(2)} € / ${_cashCollectedPln.toStringAsFixed(2)} zł.',
+                        style: TextStyle(fontSize: 11.5, color: _textSecondary),
+                      ),
+                      const SizedBox(height: 6),
+                      TextButton.icon(
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          _showAddGuestPaymentDialog(onSaved);
+                        },
+                        icon: const Icon(Icons.add, size: 16),
+                        label: const Text('Zarządzaj / Dodaj wpłatę gościa'),
+                      ),
+                    ],
+                  ),
+                ),
+              ] else ...[
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: cashEurCtrl,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        decoration: const InputDecoration(labelText: 'Odebrane EUR', suffixText: '€', border: OutlineInputBorder()),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: TextField(
+                        controller: cashPlnCtrl,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        decoration: const InputDecoration(labelText: 'Odebrane PLN', suffixText: 'zł', border: OutlineInputBorder()),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                TextButton.icon(
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    _showAddGuestPaymentDialog(onSaved);
+                  },
+                  icon: const Icon(Icons.add, size: 16),
+                  label: const Text('Dodaj jako osobną wpłatę od gościa'),
+                ),
+              ],
             ],
           ),
         ),
@@ -5390,8 +7353,10 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
               setState(() {
                 _advanceEur = double.tryParse(advEurCtrl.text.replaceAll(',', '.').trim()) ?? 0.0;
                 _advancePln = double.tryParse(advPlnCtrl.text.replaceAll(',', '.').trim()) ?? 0.0;
-                _cashCollectedEur = double.tryParse(cashEurCtrl.text.replaceAll(',', '.').trim()) ?? 0.0;
-                _cashCollectedPln = double.tryParse(cashPlnCtrl.text.replaceAll(',', '.').trim()) ?? 0.0;
+                if (_guestPayments.isEmpty) {
+                  _cashCollectedEur = double.tryParse(cashEurCtrl.text.replaceAll(',', '.').trim()) ?? 0.0;
+                  _cashCollectedPln = double.tryParse(cashPlnCtrl.text.replaceAll(',', '.').trim()) ?? 0.0;
+                }
               });
               StorageService.saveTripFinancials(
                 busCode: _selectedBusCode,
@@ -5700,6 +7665,8 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
           final guestText = [guestEur, guestPln].where((s) => s.isNotEmpty).join(' / ');
 
           return AlertDialog(
+            actionsOverflowButtonSpacing: 8,
+            actionsOverflowDirection: VerticalDirection.down,
             title: Row(
               children: [
                 const Icon(Icons.assignment, color: AppColors.brandingOrange),
@@ -5797,15 +7764,14 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                   ),
                   const SizedBox(height: 10),
 
-                  // ZALICZKA & ODEBRANE OD GOŚCI (z opcją edycji)
+                  // ZALICZKA (z opcją edycji)
                   InkWell(
                     onTap: () {
                       _showEditFinancialsDialog(() {
                         setDialogState(() {
                           summary.advanceEur = _advanceEur;
                           summary.advancePln = _advancePln;
-                          summary.cashCollectedPln = _cashCollectedPln;
-                          summary.cashCollectedEur = _cashCollectedEur;
+                          summary.guestPayments = _guestPayments;
                         });
                       });
                     },
@@ -5817,35 +7783,128 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                         borderRadius: BorderRadius.circular(8),
                         color: _cardBg,
                       ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              const Text('ZALICZKA:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.gray)),
-                              Row(
-                                children: [
-                                  Text('$eurStr  /  $plnStr', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: _textPrimary)),
-                                  const SizedBox(width: 6),
-                                  const Icon(Icons.edit, size: 14, color: AppColors.brandingOrange),
-                                ],
-                              ),
-                            ],
-                          ),
-                          Divider(height: 12, color: _borderColor),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              const Text('ODEBRANE OD GOŚCI:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.gray)),
-                              Text(
-                                guestText.isNotEmpty ? guestText : '0,00 zł / 0,00 €',
-                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: _textPrimary),
-                              ),
-                            ],
+                          const Text('ZALICZKA:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.gray)),
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Flexible(
+                                  child: Text(
+                                    '$eurStr  /  $plnStr',
+                                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: _textPrimary),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                const Icon(Icons.edit, size: 14, color: AppColors.brandingOrange),
+                              ],
+                            ),
                           ),
                         ],
                       ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+
+                  // ODEBRANE OD GOŚCI (z listą i opcją dodawania)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: _borderColor),
+                      borderRadius: BorderRadius.circular(8),
+                      color: _cardBg,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text('ODEBRANE OD GOŚCI:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.gray)),
+                            const SizedBox(width: 8),
+                            Flexible(
+                              child: Text(
+                                guestText.isNotEmpty ? guestText : '0,00 zł / 0,00 €',
+                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: _textPrimary),
+                                overflow: TextOverflow.ellipsis,
+                                textAlign: TextAlign.end,
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (_guestPayments.isNotEmpty) ...[
+                          Divider(height: 12, color: _borderColor),
+                          ..._guestPayments.map((p) => Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 2),
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.arrow_right, size: 16, color: AppColors.brandingOrange),
+                                    Expanded(
+                                      child: Text(
+                                        '${p.amount.toStringAsFixed(2)} ${p.currency}${p.passengerName.isNotEmpty ? ' (${p.passengerName})' : ''}',
+                                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _textSecondary),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    InkWell(
+                                      onTap: () {
+                                        _deleteGuestPayment(p, () {
+                                          setDialogState(() {
+                                            summary.guestPayments = List.from(_guestPayments);
+                                            summary.cashCollectedPln = _cashCollectedPln;
+                                            summary.cashCollectedEur = _cashCollectedEur;
+                                          });
+                                        });
+                                      },
+                                      child: const Padding(
+                                        padding: EdgeInsets.all(4),
+                                        child: Icon(Icons.close, size: 14, color: Colors.redAccent),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              )),
+                        ],
+                        const SizedBox(height: 6),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: InkWell(
+                            onTap: () {
+                              _showAddGuestPaymentDialog(() {
+                                setDialogState(() {
+                                  summary.guestPayments = List.from(_guestPayments);
+                                  summary.cashCollectedPln = _cashCollectedPln;
+                                  summary.cashCollectedEur = _cashCollectedEur;
+                                });
+                              });
+                            },
+                            borderRadius: BorderRadius.circular(6),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.add_circle_outline, size: 14, color: AppColors.brandingOrange),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    'Dodaj wpłatę',
+                                    style: TextStyle(
+                                      fontSize: 11.5,
+                                      fontWeight: FontWeight.bold,
+                                      color: _isDark ? const Color(0xFFFFE7D0) : AppColors.brandingOrange,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                   const SizedBox(height: 10),
@@ -5866,6 +7925,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             const Text('WYDATKI EURO:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.gray)),
+                            const SizedBox(width: 8),
                             Text(
                               '${summary.totalExpensesEur.toStringAsFixed(2)} EUR',
                               style: TextStyle(fontWeight: FontWeight.bold, color: _textPrimary),
@@ -5883,8 +7943,42 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                                 child: Text(
                                   '• ${e.amount.toStringAsFixed(2)} EUR (TANK - ${e.stationName})',
                                   style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _textSecondary),
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                               )),
+                        if (summary.advanceEur > 0) ...[
+                          Divider(height: 14, color: _borderColor),
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.account_balance_wallet_outlined,
+                                size: 14,
+                                color: summary.remainingAdvanceEur >= 0 ? const Color(0xFF27AE60) : const Color(0xFFC10801),
+                              ),
+                              const SizedBox(width: 5),
+                              Expanded(
+                                child: Text(
+                                  'POZOSTAŁO Z ZALICZKI:',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                    color: summary.remainingAdvanceEur >= 0 ? const Color(0xFF27AE60) : const Color(0xFFC10801),
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                '${summary.remainingAdvanceEur.toStringAsFixed(2)} EUR',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w900,
+                                  color: summary.remainingAdvanceEur >= 0 ? const Color(0xFF27AE60) : const Color(0xFFC10801),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -6062,7 +8156,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                 ),
                 label: const Text('Zapisz Word (.docx)'),
                 onPressed: () {
-                  DocxReportService.savePlanJazdyDocxToDesktop(context, summary);
+                  DocxReportService.savePlanJazdyDocx(context, summary);
                 },
               ),
               OutlinedButton.icon(
@@ -6075,18 +8169,6 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                 onPressed: () {
                   final text = ReportService.generatePlanJazdyText(summary);
                   ReportService.copyToClipboard(context, text);
-                },
-              ),
-              FilledButton.icon(
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF25D366),
-                  foregroundColor: Colors.white,
-                ),
-                icon: const Icon(Icons.send, size: 16),
-                label: const Text('WhatsApp'),
-                onPressed: () {
-                  final text = ReportService.generatePlanJazdyText(summary);
-                  ReportService.sendViaWhatsApp(context, text);
                 },
               ),
               FilledButton.icon(
@@ -6516,6 +8598,158 @@ class _DriverBreakDialogState extends State<DriverBreakDialog> {
     );
   }
 }
+
+class _PulsingCommentBadge extends StatefulWidget {
+  final String comment;
+  final bool isHero;
+  final bool animate;
+
+  const _PulsingCommentBadge({
+    required this.comment,
+    this.isHero = false,
+    this.animate = true,
+  });
+
+  @override
+  State<_PulsingCommentBadge> createState() => _PulsingCommentBadgeState();
+}
+
+class _PulsingCommentBadgeState extends State<_PulsingCommentBadge>
+    with SingleTickerProviderStateMixin {
+  AnimationController? _controller;
+  Animation<double>? _animation;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.animate) {
+      _startAnimation();
+    }
+  }
+
+  void _startAnimation() {
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1400),
+    )..repeat(reverse: true);
+    _animation = CurvedAnimation(
+      parent: _controller!,
+      curve: Curves.easeInOut,
+    );
+  }
+
+  @override
+  void didUpdateWidget(covariant _PulsingCommentBadge oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.animate != oldWidget.animate) {
+      if (widget.animate) {
+        if (_controller == null) {
+          _startAnimation();
+        } else {
+          _controller!.repeat(reverse: true);
+        }
+      } else {
+        _controller?.stop();
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!widget.animate || _animation == null) {
+      return Container(
+        padding: EdgeInsets.symmetric(
+          horizontal: widget.isHero ? 9 : 8,
+          vertical: widget.isHero ? 4 : 3,
+        ),
+        decoration: BoxDecoration(
+          color: const Color(0xFFC10801).withValues(alpha: 0.25),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: const Color(0xFFC10801).withValues(alpha: 0.5)),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              Icons.info_outline,
+              size: widget.isHero ? 14.5 : 13,
+              color: const Color(0xFFFF8A80),
+            ),
+            SizedBox(width: widget.isHero ? 5 : 4),
+            Expanded(
+              child: Text(
+                'Uwagi: ${widget.comment}',
+                style: TextStyle(
+                  fontSize: widget.isHero ? 12.5 : 11.5,
+                  color: const Color(0xFFFF8A80),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return AnimatedBuilder(
+      animation: _animation!,
+      builder: (context, child) {
+        final val = _animation!.value;
+        final bgAlpha = 0.20 + (val * 0.20);
+        final borderAlpha = 0.45 + (val * 0.45);
+        final glowAlpha = val * 0.22;
+
+        return Container(
+          padding: EdgeInsets.symmetric(
+            horizontal: widget.isHero ? 9 : 8,
+            vertical: widget.isHero ? 4 : 3,
+          ),
+          decoration: BoxDecoration(
+            color: const Color(0xFFC10801).withValues(alpha: bgAlpha),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(
+              color: const Color(0xFFE53935).withValues(alpha: borderAlpha),
+              width: 1.1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFFE53935).withValues(alpha: glowAlpha),
+                blurRadius: 6,
+                spreadRadius: 0.5,
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Icon(
+                Icons.info_outline,
+                size: widget.isHero ? 14.5 : 13,
+                color: Color.lerp(const Color(0xFFFF8A80), Colors.white, val * 0.35),
+              ),
+              SizedBox(width: widget.isHero ? 5 : 4),
+              Expanded(
+                child: Text(
+                  'Uwagi: ${widget.comment}',
+                  style: TextStyle(
+                    fontSize: widget.isHero ? 12.5 : 11.5,
+                    color: Color.lerp(const Color(0xFFFF8A80), Colors.white, val * 0.35),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
 
 
 

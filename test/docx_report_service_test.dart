@@ -115,6 +115,12 @@ void main() {
     expect(docXml.contains('</w:tbl></w:tc>'), isFalse,
         reason: 'Żadna komórka w:tc nie może kończyć się w:tbl bez końcowego w:p');
 
+    // Sprawdzenie automatycznego obliczania reszty z zaliczki EUR
+    expect(summary.totalExpensesEur, equals(80.0));
+    expect(summary.remainingAdvanceEur, equals(120.0));
+    expect(docXml.contains('POZOSTAŁO Z ZALICZKI (RESZTA)'), isTrue);
+    expect(docXml.contains('120.00 EUR'), isTrue);
+
     // Sprawdzenie czy przed w:sectPr jest w:p
     expect(docXml.contains(RegExp(r'</w:tbl>\s*<w:p>[\s\S]*?</w:p>\s*<w:sectPr>')), isTrue,
         reason: 'Przed w:sectPr musi znajdować się paragraf w:p');
@@ -123,5 +129,58 @@ void main() {
     final desktopFile = File('/Users/greko/Desktop/Plan_Jazdy_BB.01_01.08_-_02.08.2026.docx');
     desktopFile.writeAsBytesSync(bytes);
     expect(desktopFile.existsSync(), isTrue);
+  });
+
+  test('GuestPaymentEntry calculates cashCollectedPln and cashCollectedEur and includes them in docx', () {
+    final payments = [
+      GuestPaymentEntry(
+        id: '1',
+        amount: 150.0,
+        currency: 'PLN',
+        passengerName: 'Marek Nowak',
+        timestamp: DateTime(2026, 8, 1, 14, 0),
+      ),
+      GuestPaymentEntry(
+        id: '2',
+        amount: 80.0,
+        currency: 'EUR',
+        passengerName: 'Anna Kowalska',
+        timestamp: DateTime(2026, 8, 1, 16, 30),
+      ),
+      GuestPaymentEntry(
+        id: '3',
+        amount: 50.0,
+        currency: 'EUR',
+        passengerName: 'Piotr Zieliński',
+        timestamp: DateTime(2026, 8, 2, 9, 0),
+      ),
+    ];
+
+    final summary = WeekendTripSummary(
+      busCode: 'BB.01',
+      dateRange: '01.08 - 02.08.2026',
+      driverName: 'Jan Kowalski',
+      driverPhone: '123 456 789',
+      vehicleModel: 'Mercedes-Benz Vito',
+      registrationNumber: 'GA 12345',
+      advanceEur: 200,
+      guestPayments: payments,
+    );
+
+    expect(summary.cashCollectedPln, equals(150.0));
+    expect(summary.cashCollectedEur, equals(130.0));
+
+    final bytes = DocxReportService.generatePlanJazdyDocxBytes(summary);
+    final archive = ZipDecoder().decodeBytes(bytes);
+    final docFile = archive.findFile('word/document.xml')!;
+    final docXml = utf8.decode(docFile.content as List<int>);
+
+    expect(docXml.contains('Marek Nowak'), isTrue);
+    expect(docXml.contains('150.00 PLN'), isTrue);
+    expect(docXml.contains('Anna Kowalska'), isTrue);
+    expect(docXml.contains('80.00 EUR'), isTrue);
+    expect(docXml.contains('Piotr Zieliński'), isTrue);
+    expect(docXml.contains('50.00 EUR'), isTrue);
+    expect(docXml.contains('Razem: 130.00 € / 150.00 zł'), isTrue);
   });
 }

@@ -12,7 +12,7 @@ void main() {
   testWidgets('BalticBusApp smoke test - verifies route and vehicle information',
       (WidgetTester tester) async {
     SharedPreferences.setMockInitialValues({});
-    await tester.pumpWidget(const BalticBusApp());
+    await tester.pumpWidget(const BalticBusApp(initialHasActiveTrip: true));
     await tester.pumpAndSettle();
 
     // Verify vehicle information in title
@@ -37,9 +37,22 @@ void main() {
     expect(find.text('Angelika Borchert'), findsOneWidget);
   });
 
+  testWidgets('Fresh install starts on clean welcome screen without test data',
+      (WidgetTester tester) async {
+    SharedPreferences.setMockInitialValues({});
+    await tester.pumpWidget(const BalticBusApp(initialHasActiveTrip: false));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Rozpocznij przejazd'), findsOneWidget);
+    expect(find.byKey(const ValueKey('balticbus_logo_detector')), findsOneWidget);
+    expect(find.text('Probably the best door-to-door transport in Europe.'), findsOneWidget);
+    expect(find.textContaining('BB.01'), findsNothing);
+    expect(find.text('Angelika Borchert'), findsNothing);
+  });
+
   testWidgets('Driver break start and stop flow test', (WidgetTester tester) async {
     SharedPreferences.setMockInitialValues({});
-    await tester.pumpWidget(const BalticBusApp());
+    await tester.pumpWidget(const BalticBusApp(initialHasActiveTrip: true));
     await tester.pumpAndSettle();
 
     // Switch to Tab 2: Raporty & Czas
@@ -66,7 +79,7 @@ void main() {
 
   testWidgets('Plan Jazdy full weekend summary dialog test', (WidgetTester tester) async {
     SharedPreferences.setMockInitialValues({});
-    await tester.pumpWidget(const BalticBusApp());
+    await tester.pumpWidget(const BalticBusApp(initialHasActiveTrip: true));
     await tester.pumpAndSettle();
 
     // Switch to Tab 2: Raporty & Czas
@@ -119,7 +132,7 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     BalticBusApp.themeNotifier.value = ThemeMode.dark;
 
-    await tester.pumpWidget(const BalticBusApp());
+    await tester.pumpWidget(const BalticBusApp(initialHasActiveTrip: true));
     await tester.pumpAndSettle();
 
     expect(BalticBusApp.themeNotifier.value, ThemeMode.dark);
@@ -130,7 +143,7 @@ void main() {
 
   testWidgets('Finish trip and clear database flow test (Variant A)', (WidgetTester tester) async {
     SharedPreferences.setMockInitialValues({});
-    await tester.pumpWidget(const BalticBusApp());
+    await tester.pumpWidget(const BalticBusApp(initialHasActiveTrip: true));
     await tester.pumpAndSettle();
 
     // Switch to Tab 2: Raporty & Czas
@@ -170,7 +183,7 @@ void main() {
   testWidgets('Bottom navigation tabs switch between Route, Vehicle & Fuel, and Reports & Time',
       (WidgetTester tester) async {
     SharedPreferences.setMockInitialValues({});
-    await tester.pumpWidget(const BalticBusApp());
+    await tester.pumpWidget(const BalticBusApp(initialHasActiveTrip: true));
     await tester.pumpAndSettle();
 
     // Tab 0: Trasa & Pasażerowie
@@ -196,7 +209,7 @@ void main() {
 
   testWidgets('Driver Break modal dialog live timer and tacho milestones test', (WidgetTester tester) async {
     SharedPreferences.setMockInitialValues({});
-    await tester.pumpWidget(const BalticBusApp());
+    await tester.pumpWidget(const BalticBusApp(initialHasActiveTrip: true));
     await tester.pumpAndSettle();
 
     // Verify Pauza pill is visible in the Route header
@@ -253,7 +266,7 @@ void main() {
   testWidgets('Theme selector displays exactly the 3 active themes: Baltic Noir, Baltic Orange, Charcoal Noir',
       (WidgetTester tester) async {
     SharedPreferences.setMockInitialValues({});
-    await tester.pumpWidget(const BalticBusApp());
+    await tester.pumpWidget(const BalticBusApp(initialHasActiveTrip: true));
     await tester.pumpAndSettle();
 
     // 1. Open theme selector sheet via palette icon in AppBar
@@ -271,5 +284,127 @@ void main() {
     await tester.tap(find.text('BALTIC ORANGE'));
     await tester.pumpAndSettle();
     expect(AppColors.currentTheme.value, AppThemeStyle.balticOrange);
+  });
+
+  testWidgets('Coffee break reminder settings and simulation test', (WidgetTester tester) async {
+    SharedPreferences.setMockInitialValues({});
+    await tester.pumpWidget(const BalticBusApp(initialHasActiveTrip: true));
+    await tester.pumpAndSettle();
+
+    // 1. Long press on "Pauza" button to open coffee reminder settings
+    expect(find.text('Pauza'), findsOneWidget);
+    await tester.longPress(find.text('Pauza'));
+    await tester.pumpAndSettle();
+
+    // Verify settings dialog appears
+    expect(find.text('Przypomnienie o kawie'), findsOneWidget);
+    expect(find.text('2,5 godz. (zalecane)'), findsOneWidget);
+    expect(find.text('Symuluj 2,5h jazdy (test komunikatu)'), findsOneWidget);
+
+    // 2. Click simulation button to trigger 2.5h drive time test
+    await tester.tap(find.text('Symuluj 2,5h jazdy (test komunikatu)'));
+    await tester.pumpAndSettle();
+
+    // Verify banner appears on Route tab
+    expect(find.text('☕ Czas na przerwę i kawę!'), findsOneWidget);
+    expect(find.text('Zrób przerwę'), findsOneWidget);
+    expect(find.text('Za 15 min'), findsOneWidget);
+
+    // 3. Click "Za 15 min" to snooze reminder
+    await tester.tap(find.text('Za 15 min'));
+    await tester.pumpAndSettle();
+
+    // Banner is dismissed
+    expect(find.text('☕ Czas na przerwę i kawę!'), findsNothing);
+  });
+
+  testWidgets('Pulsing comment badge renders for passenger with Rollator note', (WidgetTester tester) async {
+    SharedPreferences.setMockInitialValues({});
+    await tester.pumpWidget(const BalticBusApp(initialHasActiveTrip: true));
+    await tester.pumpAndSettle();
+
+    // 1. Switch to Sunday route which contains the passenger with "Rollator !" note
+    final sundayPill = find.textContaining('Niedziela');
+    expect(sundayPill, findsOneWidget);
+    await tester.tap(sundayPill);
+    await tester.pumpAndSettle();
+
+    // 2. Scroll to Hanon, Bella Sivachinski who has the "Rollator !" note
+    final passengerNameFinder = find.text('Hanon, Bella Sivachinski');
+    await tester.scrollUntilVisible(
+      passengerNameFinder,
+      200.0,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(passengerNameFinder, findsOneWidget);
+
+    // 3. Tap to expand passenger card (using pump instead of pumpAndSettle due to repeating animation)
+    await tester.tap(passengerNameFinder);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    // 4. Verify pulsing comment badge appears
+    expect(find.text('Uwagi: Rollator !'), findsOneWidget);
+
+    // 5. Verify pulsing animation runs smoothly over frames
+    await tester.pump(const Duration(milliseconds: 700));
+    await tester.pump(const Duration(milliseconds: 700));
+    expect(find.text('Uwagi: Rollator !'), findsOneWidget);
+  });
+
+  testWidgets('Night Cockpit HUD mode toggle, display, navigation, and exit test',
+      (WidgetTester tester) async {
+    SharedPreferences.setMockInitialValues({});
+    await tester.pumpWidget(const BalticBusApp(initialHasActiveTrip: true));
+    await tester.pumpAndSettle();
+
+    // 1. Verify "KOKPIT HUD" button in AppBar and tap it
+    final hudToggleBtn = find.byKey(const ValueKey('hud_mode_toggle_btn'));
+    expect(hudToggleBtn, findsOneWidget);
+    await tester.tap(hudToggleBtn);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    // 2. Verify HUD mode components are present and layout hierarchy:
+    // (Passenger name at top, street address in middle, postal code & city in one line below)
+    expect(find.byKey(const ValueKey('hud_exit_button')), findsOneWidget);
+    expect(find.byKey(const ValueKey('hud_navigate_button')), findsOneWidget);
+    expect(find.byKey(const ValueKey('hud_transfer_button')), findsOneWidget);
+    expect(find.text('PLANOWANA GODZINA'), findsOneWidget);
+    expect(find.text('Angelika Borchert'), findsOneWidget);
+    expect(find.textContaining('Kołobrzeg'), findsWidgets);
+    expect(find.text('NAWIGUJ (GOOGLE MAPS)'), findsOneWidget);
+    expect(find.text('Przesiadka'), findsOneWidget);
+    expect(find.text('NORMALNY'), findsOneWidget);
+
+    // 3. Tap "Następny" in HUD footer to advance stop preview
+    final nextBtn = find.text('Następny');
+    expect(nextBtn, findsOneWidget);
+    await tester.tap(nextBtn);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    // 4. Switch to Sunday route in HUD mode to verify German address parsing
+    final sundayHudPill = find.textContaining('Niedziela');
+    expect(sundayHudPill, findsOneWidget);
+    await tester.tap(sundayHudPill);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    // Sunday stop 1 is Wilhelm Godecke: "31582 Nienburg, Ostlandstr. 13"
+    // Street must be "Ostlandstr. 13" and postal & city must be "31582 Nienburg" in one line
+    expect(find.text('Ostlandstr. 13'), findsOneWidget);
+    expect(find.text('31582 Nienburg'), findsOneWidget);
+
+    // 5. Tap "NORMALNY" to exit HUD mode back to standard route screen
+    final exitBtn = find.byKey(const ValueKey('hud_exit_button'));
+    await tester.tap(exitBtn);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    // Verify HUD is closed and standard tabs are back
+    expect(find.byKey(const ValueKey('hud_exit_button')), findsNothing);
+    expect(find.text('Trasa'), findsOneWidget);
+    expect(find.text('Tankowanie'), findsOneWidget);
   });
 }

@@ -180,6 +180,26 @@ class StorageService {
     );
   }
 
+  static Future<void> saveGuestPayments(String busCode, List<GuestPaymentEntry> payments) async {
+    final prefs = await SharedPreferences.getInstance();
+    final jsonList = payments.map((p) => p.toJson()).toList();
+    await prefs.setString('guest_payments_$busCode', jsonEncode(jsonList));
+  }
+
+  static Future<List<GuestPaymentEntry>> loadGuestPayments(String busCode) async {
+    final prefs = await SharedPreferences.getInstance();
+    final str = prefs.getString('guest_payments_$busCode');
+    if (str == null || str.isEmpty) return [];
+    try {
+      final list = jsonDecode(str) as List;
+      return list
+          .map((item) => GuestPaymentEntry.fromJson(item as Map<String, dynamic>))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
   static const String _themeModeKey = 'app_theme_is_dark';
   static const String _paletteThemeKey = 'app_palette_theme_id';
 
@@ -204,6 +224,9 @@ class StorageService {
   }
 
   static const String _hasActiveTripKey = 'balticbus_has_active_trip';
+  static const String _activeAssetPathKey = 'balticbus_active_asset_path';
+  static const String _activeExcelBytesKey = 'balticbus_active_excel_bytes';
+  static const String _activeBusCodeKey = 'balticbus_active_bus_code';
 
   static Future<void> setHasActiveTrip(bool value) async {
     final prefs = await SharedPreferences.getInstance();
@@ -212,7 +235,63 @@ class StorageService {
 
   static Future<bool> hasActiveTrip() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_hasActiveTripKey) ?? true;
+    return prefs.getBool(_hasActiveTripKey) ?? false;
+  }
+
+  static Future<void> saveActiveTripSource({String? assetPath, List<int>? excelBytes, String? busCode}) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (assetPath != null) {
+      await prefs.setString(_activeAssetPathKey, assetPath);
+      await prefs.remove(_activeExcelBytesKey);
+    } else if (excelBytes != null) {
+      await prefs.setString(_activeExcelBytesKey, base64Encode(excelBytes));
+      await prefs.remove(_activeAssetPathKey);
+    }
+    if (busCode != null) {
+      await prefs.setString(_activeBusCodeKey, busCode);
+    }
+  }
+
+  static Future<void> saveActiveBusCode(String busCode) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_activeBusCodeKey, busCode);
+  }
+
+  static Future<({String? assetPath, List<int>? excelBytes, String? busCode})> loadActiveTripSource() async {
+    final prefs = await SharedPreferences.getInstance();
+    final assetPath = prefs.getString(_activeAssetPathKey);
+    final bytesStr = prefs.getString(_activeExcelBytesKey);
+    final busCode = prefs.getString(_activeBusCodeKey);
+    List<int>? bytes;
+    if (bytesStr != null && bytesStr.isNotEmpty) {
+      try {
+        bytes = base64Decode(bytesStr);
+      } catch (_) {}
+    }
+    return (assetPath: assetPath, excelBytes: bytes, busCode: busCode);
+  }
+
+  static const String _coffeeReminderMinutesKey = 'coffee_reminder_minutes';
+
+  static Future<void> saveCoffeeReminderMinutes(int minutes) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_coffeeReminderMinutesKey, minutes);
+  }
+
+  static Future<int> loadCoffeeReminderMinutes() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_coffeeReminderMinutesKey) ?? 150; // Domyślnie 2.5h (150 min)
+  }
+
+  static Future<void> saveDriveStartTime(String routeId, DateTime time) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('drive_start_$routeId', time.toIso8601String());
+  }
+
+  static Future<DateTime?> loadDriveStartTime(String routeId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final str = prefs.getString('drive_start_$routeId');
+    return str != null ? DateTime.tryParse(str) : null;
   }
 
   /// Czyści wszystkie dane bieżącego kursu (liczniki, tankowania, przerwy, statusy pasażerów, finanse)
