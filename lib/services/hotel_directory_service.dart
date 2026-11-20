@@ -44,8 +44,9 @@ class HotelInfo {
 class HotelDirectoryService {
   static const String permanentStorageKey = 'balticbus_permanent_hotel_directory';
 
-  /// Predefiniowany katalog popularnych hoteli i ośrodków nadmorskich z tras BalticBus
+  /// Predefiniowany katalog popularnych hoteli i ośrodków nadmorskich oraz uzdrowiskowych z tras BalticBus
   static final Map<String, HotelInfo> defaultHotels = {
+    // === KOŁOBRZEG ===
     'san': const HotelInfo(
       name: 'San',
       address: 'ul. Kasprowicza 24',
@@ -63,31 +64,10 @@ class HotelDirectoryService {
       address: 'ul. Wschodnia 35',
       city: 'Kołobrzeg',
     ),
-    'max': const HotelInfo(
-      name: 'Max',
-      address: 'ul. Morska 16',
-      city: 'Ustronie Morskie',
-    ),
-    'interferie': const HotelInfo(
-      name: 'Interferie',
-      address: 'ul. Uzdrowiskowa 15',
-      city: 'Świnoujście',
-      note: 'Interferie Medical SPA',
-    ),
     'verano': const HotelInfo(
       name: 'Verano',
       address: 'ul. Sikorskiego 8',
       city: 'Kołobrzeg',
-    ),
-    'wydma spa': const HotelInfo(
-      name: 'Wydma Spa',
-      address: 'ul. Bałtycka 8',
-      city: 'Mrzeżyno',
-    ),
-    'trzy wyspy': const HotelInfo(
-      name: 'Trzy Wyspy',
-      address: 'ul. Cieszkowskiego 1',
-      city: 'Świnoujście',
     ),
     'muszelka': const HotelInfo(
       name: 'Muszelka',
@@ -99,40 +79,20 @@ class HotelDirectoryService {
       address: 'ul. Wolności 4',
       city: 'Kołobrzeg',
     ),
+    'olymp 3': const HotelInfo(
+      name: 'Olymp 3',
+      address: 'ul. Spacerowa 4',
+      city: 'Kołobrzeg',
+    ),
     'olymp 4': const HotelInfo(
       name: 'Olymp 4',
       address: 'ul. Koszalińska 17',
       city: 'Kołobrzeg',
     ),
-    'ottaviano': const HotelInfo(
-      name: 'Ottaviano',
-      address: 'ul. Monte Cassino 3',
-      city: 'Świnoujście',
-    ),
-    'chabinka mdz': const HotelInfo(
-      name: 'Chabinka MDZ',
-      address: 'ul. Gryfa Pomorskiego 79',
-      city: 'Międzyzdroje',
-    ),
     'koral live': const HotelInfo(
       name: 'Koral Live',
       address: 'ul. Kościuszki 10',
       city: 'Kołobrzeg',
-    ),
-    'delfin': const HotelInfo(
-      name: 'Delfin',
-      address: 'ul. Uzdrowiskowa 3',
-      city: 'Świnoujście',
-    ),
-    'stella maris': const HotelInfo(
-      name: 'Stella Maris',
-      address: 'ul. Gierczak 2',
-      city: 'Świnoujście',
-    ),
-    'bursztyn': const HotelInfo(
-      name: 'Bursztyn',
-      address: 'ul. Chopina 1',
-      city: 'Świnoujście',
     ),
     'wodnik': const HotelInfo(
       name: 'Wodnik',
@@ -141,6 +101,11 @@ class HotelDirectoryService {
     ),
     'perła bałtyku': const HotelInfo(
       name: 'Perła Bałtyku',
+      address: 'ul. Sikorskiego 3',
+      city: 'Kołobrzeg',
+    ),
+    'perła bałtyku kg': const HotelInfo(
+      name: 'Perła Bałtyku KG',
       address: 'ul. Sikorskiego 3',
       city: 'Kołobrzeg',
     ),
@@ -159,6 +124,260 @@ class HotelDirectoryService {
       address: 'ul. Kasprowicza 24',
       city: 'Kołobrzeg',
     ),
+    'nad parsętą': const HotelInfo(
+      name: 'Nad Parsętą',
+      address: 'ul. Szpitalna 1',
+      city: 'Kołobrzeg',
+      note: 'Sanatorium Nad Parsętą',
+    ),
+    'park hotel': const HotelInfo(
+      name: 'Park Hotel',
+      address: 'ul. Koszalińska 1',
+      city: 'Kołobrzeg',
+    ),
+    'monalisa': const HotelInfo(
+      name: 'MonaLisa',
+      address: 'ul. Lazurowa 1',
+      city: 'Kołobrzeg',
+      note: 'MonaLisa Medical SPA Podczele',
+    ),
+    'radisson kg': const HotelInfo(
+      name: 'Radisson KG',
+      address: 'ul. Morawskiego 1',
+      city: 'Kołobrzeg',
+      note: 'Radisson Resort Kołobrzeg',
+    ),
+    'radisson': const HotelInfo(
+      name: 'Radisson Resort',
+      address: 'ul. Morawskiego 1',
+      city: 'Kołobrzeg',
+    ),
+    'wistom': const HotelInfo(
+      name: 'Wistom',
+      address: 'ul. Chrobrego 14',
+      city: 'Kołobrzeg',
+    ),
+    'lech': const HotelInfo(
+      name: 'Lech',
+      address: 'ul. Korzeniowskiego 1',
+      city: 'Kołobrzeg',
+      note: 'Sanatorium Lech',
+    ),
+    'kielczanka': const HotelInfo(
+      name: 'Kielczanka',
+      address: 'ul. Rodziewiczówny 15',
+      city: 'Kołobrzeg',
+      note: 'Sanatorium Kielczanka',
+    ),
+    'diva': const HotelInfo(
+      name: 'Diva',
+      address: 'ul. Kościuszki 16',
+      city: 'Kołobrzeg',
+      note: 'Hotel Diva SPA',
+    ),
+    'podczele': const HotelInfo(
+      name: 'Podczele',
+      address: 'ul. Kresowa 6',
+      city: 'Kołobrzeg',
+    ),
+    'unii lub. 22': const HotelInfo(
+      name: 'Unii Lub. 22',
+      address: 'ul. Unii Lubelskiej 22',
+      city: 'Kołobrzeg',
+    ),
+
+    // === ŚWINOUJŚCIE ===
+    'cesarskie o.': const HotelInfo(
+      name: 'Cesarskie O.',
+      address: 'ul. Stanisława Wyspiańskiego 34A',
+      city: 'Świnoujście',
+      note: 'Cesarskie Ogrody',
+    ),
+    'cesarskie ogrody': const HotelInfo(
+      name: 'Cesarskie Ogrody',
+      address: 'ul. Stanisława Wyspiańskiego 34A',
+      city: 'Świnoujście',
+    ),
+    'platino mare': const HotelInfo(
+      name: 'Platino Mare',
+      address: 'ul. Stefana Żeromskiego 78',
+      city: 'Świnoujście',
+    ),
+    'sobótka': const HotelInfo(
+      name: 'Sobótka',
+      address: 'ul. Henryka Sienkiewicza 13',
+      city: 'Świnoujście',
+    ),
+    'avangard resort': const HotelInfo(
+      name: 'Avangard Resort',
+      address: 'ul. Uzdrowiskowa 5',
+      city: 'Świnoujście',
+    ),
+    'rybniczanka': const HotelInfo(
+      name: 'Rybniczanka',
+      address: 'ul. Jana Kasprowicza 14',
+      city: 'Świnoujście',
+    ),
+    'alga': const HotelInfo(
+      name: 'Alga',
+      address: 'ul. Juliusza Słowackiego 5',
+      city: 'Świnoujście',
+    ),
+    'marisol': const HotelInfo(
+      name: 'MariSol',
+      address: 'ul. Bolesława Chrobrego 42',
+      city: 'Świnoujście',
+    ),
+    'rezydent resort': const HotelInfo(
+      name: 'Rezydent Resort',
+      address: 'ul. Uzdrowiskowa 1A',
+      city: 'Świnoujście',
+    ),
+    'villa rezydent': const HotelInfo(
+      name: 'Villa Rezydent',
+      address: 'ul. Uzdrowiskowa 1',
+      city: 'Świnoujście',
+    ),
+    'polaris': const HotelInfo(
+      name: 'Polaris',
+      address: 'ul. Juliusza Słowackiego 33',
+      city: 'Świnoujście',
+    ),
+    'polaris 2': const HotelInfo(
+      name: 'Polaris 2',
+      address: 'ul. Juliusza Słowackiego 33',
+      city: 'Świnoujście',
+    ),
+    'polaris 3': const HotelInfo(
+      name: 'Polaris 3',
+      address: 'ul. Stefana Żeromskiego 26',
+      city: 'Świnoujście',
+    ),
+    'el-pak': const HotelInfo(
+      name: 'El-Pak',
+      address: 'ul. Henryka Sienkiewicza 7',
+      city: 'Świnoujście',
+    ),
+    'el pak': const HotelInfo(
+      name: 'El-Pak',
+      address: 'ul. Henryka Sienkiewicza 7',
+      city: 'Świnoujście',
+    ),
+    'hamilton': const HotelInfo(
+      name: 'Hamilton',
+      address: 'ul. Uzdrowiskowa 25',
+      city: 'Świnoujście',
+      note: 'Hotel Hamilton',
+    ),
+    'interferie': const HotelInfo(
+      name: 'Interferie',
+      address: 'ul. Uzdrowiskowa 15',
+      city: 'Świnoujście',
+      note: 'Interferie Medical SPA',
+    ),
+    'trzy wyspy': const HotelInfo(
+      name: 'Trzy Wyspy',
+      address: 'ul. Cieszkowskiego 1',
+      city: 'Świnoujście',
+    ),
+    'ottaviano': const HotelInfo(
+      name: 'Ottaviano',
+      address: 'ul. Monte Cassino 3',
+      city: 'Świnoujście',
+    ),
+    'delfin': const HotelInfo(
+      name: 'Delfin',
+      address: 'ul. Uzdrowiskowa 3',
+      city: 'Świnoujście',
+    ),
+    'stella maris': const HotelInfo(
+      name: 'Stella Maris',
+      address: 'ul. Gierczak 2',
+      city: 'Świnoujście',
+    ),
+    'bursztyn': const HotelInfo(
+      name: 'Bursztyn',
+      address: 'ul. Chopina 1',
+      city: 'Świnoujście',
+    ),
+    'west baltic': const HotelInfo(
+      name: 'West Baltic',
+      address: 'ul. Stefana Żeromskiego 22',
+      city: 'Świnoujście',
+      note: 'West Baltic Resort',
+    ),
+    'baltic spa': const HotelInfo(
+      name: 'Baltic Spa',
+      address: 'ul. Trentowskiego 4',
+      city: 'Świnoujście',
+    ),
+    'gold': const HotelInfo(
+      name: 'Gold',
+      address: 'ul. Uzdrowiskowa 3',
+      city: 'Świnoujście',
+    ),
+    'afrodyta': const HotelInfo(
+      name: 'Afrodyta',
+      address: 'ul. Grunwaldzka 10',
+      city: 'Świnoujście',
+    ),
+    'afrodyta spa': const HotelInfo(
+      name: 'Afrodyta Spa',
+      address: 'ul. Grunwaldzka 10',
+      city: 'Świnoujście',
+    ),
+    'cis': const HotelInfo(
+      name: 'Cis',
+      address: 'ul. Kościuszki 4',
+      city: 'Świnoujście',
+    ),
+    'phoenix': const HotelInfo(
+      name: 'Phoenix',
+      address: 'ul. Konopnickiej 5',
+      city: 'Świnoujście',
+    ),
+    'atol': const HotelInfo(
+      name: 'Atol',
+      address: 'ul. Rybaki 1',
+      city: 'Świnoujście',
+    ),
+    'topaz': const HotelInfo(
+      name: 'Topaz',
+      address: 'ul. Chrobrego 26',
+      city: 'Świnoujście',
+    ),
+    'irys': const HotelInfo(
+      name: 'Irys',
+      address: 'ul. Kasprowicza 10',
+      city: 'Świnoujście',
+    ),
+    'ewerdin': const HotelInfo(
+      name: 'Ewerdin',
+      address: 'ul. Cieszkowskiego 4',
+      city: 'Świnoujście',
+    ),
+    'promenada': const HotelInfo(
+      name: 'Promenada',
+      address: 'ul. Żeromskiego 20',
+      city: 'Świnoujście',
+    ),
+    'promenada i': const HotelInfo(
+      name: 'Promenada I',
+      address: 'ul. Żeromskiego 20',
+      city: 'Świnoujście',
+    ),
+
+    // === MIĘDZYZDROJE ===
+    'chabinka mdz': const HotelInfo(
+      name: 'Chabinka MDZ',
+      address: 'ul. Gryfa Pomorskiego 74',
+      city: 'Międzyzdroje',
+    ),
+    'chabinka': const HotelInfo(
+      name: 'Chabinka',
+      address: 'ul. Gryfa Pomorskiego 74',
+      city: 'Międzyzdroje',
+    ),
     'amber baltic': const HotelInfo(
       name: 'Vienna House Amber Baltic',
       address: 'Promenada Gwiazd 1',
@@ -168,6 +387,28 @@ class HotelDirectoryService {
       name: 'Hotel Wolin',
       address: 'ul. Ścieżka Polna 1',
       city: 'Międzyzdroje',
+    ),
+    'vestina': const HotelInfo(
+      name: 'Vestina',
+      address: 'Promenada Gwiazd 30',
+      city: 'Międzyzdroje',
+    ),
+    'trofana': const HotelInfo(
+      name: 'Trofana',
+      address: 'ul. Gryfa Pomorskiego 70',
+      city: 'Międzyzdroje',
+    ),
+    'bielik': const HotelInfo(
+      name: 'Bielik',
+      address: 'ul. Rybicka 2',
+      city: 'Międzyzdroje',
+    ),
+
+    // === USTRONIE MORSKIE ===
+    'max': const HotelInfo(
+      name: 'Max',
+      address: 'ul. Morska 16',
+      city: 'Ustronie Morskie',
     ),
     'bagicz': const HotelInfo(
       name: 'Bagicz Voda Spa',
@@ -179,6 +420,13 @@ class HotelDirectoryService {
       address: 'ul. Kasprowicza 13',
       city: 'Ustronie Morskie',
     ),
+    'erania': const HotelInfo(
+      name: 'Erania',
+      address: 'Malechowo 26A',
+      city: 'Ustronie Morskie',
+    ),
+
+    // === DŹWIRZYNO ===
     'geovita': const HotelInfo(
       name: 'Geovita',
       address: 'ul. Północna 2',
@@ -194,6 +442,119 @@ class HotelDirectoryService {
       address: 'ul. Pionierów 2',
       city: 'Dźwirzyno',
     ),
+    'akces': const HotelInfo(
+      name: 'Akces',
+      address: 'ul. Piastowska 5',
+      city: 'Dźwirzyno',
+      note: 'Akces Medical Spa',
+    ),
+
+    // === ŚWIERADÓW-ZDRÓJ / JELENIA GÓRA ===
+    'st. lukas': const HotelInfo(
+      name: 'St. Lukas',
+      address: 'ul. Sienkiewicza 21',
+      city: 'Świeradów Zdrój',
+    ),
+    'magnolia 3': const HotelInfo(
+      name: 'Magnolia 3',
+      address: 'ul. Wczasowa 1',
+      city: 'Świeradów Zdrój',
+    ),
+    'dom zdrojowy': const HotelInfo(
+      name: 'Dom Zdrojowy',
+      address: 'ul. 3 Maja 1',
+      city: 'Świeradów Zdrój',
+    ),
+    'dom zdrojowy śwr': const HotelInfo(
+      name: 'Dom Zdrojowy ŚWR',
+      address: 'ul. 3 Maja 1',
+      city: 'Świeradów Zdrój',
+    ),
+    'buczyński spa': const HotelInfo(
+      name: 'Buczyński Spa',
+      address: 'ul. Prusa 2',
+      city: 'Świeradów Zdrój',
+      note: 'Buczyński Medical & Spa',
+    ),
+    'berliner': const HotelInfo(
+      name: 'Berliner',
+      address: 'ul. Piłsudskiego 8',
+      city: 'Świeradów Zdrój',
+    ),
+    'kaja': const HotelInfo(
+      name: 'Kaja',
+      address: 'ul. Sienkiewicza 15',
+      city: 'Świeradów Zdrój',
+    ),
+    'dom sandi': const HotelInfo(
+      name: 'Dom Sandi',
+      address: 'ul. Wczasowa 4',
+      city: 'Świeradów Zdrój',
+    ),
+    'długi dom': const HotelInfo(
+      name: 'Długi Dom',
+      address: 'ul. Ściegiennego 10',
+      city: 'Jelenia Góra',
+      note: 'Cieplice',
+    ),
+    'długi dom jg': const HotelInfo(
+      name: 'Długi Dom JG',
+      address: 'ul. Ściegiennego 10',
+      city: 'Jelenia Góra',
+      note: 'Cieplice',
+    ),
+
+    // === INNE MIEJSCOWOŚCI (Mrzeżyno, Pobierowo, Niechorze, Mielno, Międzywodzie, Dziwnówek) ===
+    'wydma spa': const HotelInfo(
+      name: 'Wydma Spa',
+      address: 'ul. Marynarska 2',
+      city: 'Mrzeżyno',
+    ),
+    'bagińscy pob': const HotelInfo(
+      name: 'Bagińscy POB',
+      address: 'ul. Grunwaldzka 89',
+      city: 'Pobierowo',
+      note: 'Bagińscy Spa Pobierowo',
+    ),
+    'bagińscy spa': const HotelInfo(
+      name: 'Bagińscy Spa',
+      address: 'ul. Grunwaldzka 89',
+      city: 'Pobierowo',
+    ),
+    'paula spa': const HotelInfo(
+      name: 'Paula SPA',
+      address: 'ul. Wojska Polskiego 17',
+      city: 'Pobierowo',
+    ),
+    'chimera': const HotelInfo(
+      name: 'Chimera',
+      address: 'ul. Spacerowa 5',
+      city: 'Niechorze',
+      note: 'Chimera SPA',
+    ),
+    'millennium': const HotelInfo(
+      name: 'Millennium',
+      address: 'ul. Bałtycka 13',
+      city: 'Międzywodzie',
+      note: 'Ośrodek Millennium',
+    ),
+    'dziwnówek': const HotelInfo(
+      name: 'Dziwnówek',
+      address: 'ul. Wolności 4',
+      city: 'Dziwnówek',
+    ),
+    'unitral': const HotelInfo(
+      name: 'Unitral',
+      address: 'ul. Piastów 6',
+      city: 'Mielno',
+      note: 'Hotel Unitral',
+    ),
+    'stargard': const HotelInfo(
+      name: 'Stargard',
+      address: 'ul. Szczecińska 101',
+      city: 'Stargard',
+      note: 'Punkt Przesiadkowy',
+    ),
   };
 
   /// Pamięć podręczna w RAM
@@ -206,11 +567,13 @@ class HotelDirectoryService {
 
   static String normalizeKey(String raw) {
     var clean = raw.trim().toLowerCase();
-    // Usunięcie nawiasów np. "Verano (Kołobrzeg)" -> "verano"
+    // 1. Usunięcie nawiasów np. "Verano (Kołobrzeg)" -> "verano"
     final parenIdx = clean.indexOf('(');
     if (parenIdx != -1) {
       clean = clean.substring(0, parenIdx).trim();
     }
+    // 2. Usunięcie cudzysłowów na końcach
+    clean = clean.replaceAll(RegExp(r'''['"„”]+$'''), '').trim();
     return clean;
   }
 
@@ -225,7 +588,13 @@ class HotelDirectoryService {
       if (rawJson != null && rawJson.isNotEmpty) {
         final decoded = jsonDecode(rawJson) as Map<String, dynamic>;
         for (final entry in decoded.entries) {
-          map[entry.key] = HotelInfo.fromJson(entry.value as Map<String, dynamic>);
+          final loaded = HotelInfo.fromJson(entry.value as Map<String, dynamic>);
+          // ZABEZPIECZENIE: jeśli w pamięci urządzenia jest wpis bez adresu,
+          // a w katalogu domyślnym mamy już zweryfikowany adres, ZACHOWAJ adres z katalogu domyślnego!
+          if (loaded.address.trim().isEmpty && map.containsKey(entry.key) && map[entry.key]!.address.trim().isNotEmpty) {
+            continue;
+          }
+          map[entry.key] = loaded;
         }
       }
     } catch (_) {}
@@ -240,15 +609,65 @@ class HotelDirectoryService {
     final all = _cachedHotels ?? defaultHotels;
     final key = normalizeKey(rawName);
 
-    if (all.containsKey(key)) {
+    // 1. Dokładne dopasowanie po znormalizowanym kluczu (jeśli ma adres)
+    if (all.containsKey(key) && all[key]!.address.isNotEmpty) {
       return all[key];
     }
 
+    // 2. Bezpośrednie dopasowanie po surowym kluczu w małych literach (jeśli ma adres)
+    final rawLower = rawName.trim().toLowerCase();
+    if (all.containsKey(rawLower) && all[rawLower]!.address.isNotEmpty) {
+      return all[rawLower];
+    }
+
+    // 3. Sprawdzenie bez sufiksów miast (np. "kg", "śwr", "swr", "mdz", "pob", "jg")
+    final stripped = key.replaceAll(RegExp(r'\s+(kg|śwr|swr|mdz|pob|jg|pl)$'), '').trim();
+    if (stripped != key && all.containsKey(stripped) && all[stripped]!.address.isNotEmpty) {
+      return all[stripped];
+    }
+
+    // 4. Szukanie wariantów ze zmapowanym adresem (ignorując wpisy bez adresu)
     for (final entry in all.entries) {
-      if (key.contains(entry.key) || entry.key.contains(key)) {
+      if (entry.value.address.isEmpty) continue;
+      if (entry.key == key || entry.key == stripped) return entry.value;
+      if (key.length >= 4 && entry.key.length >= 4) {
+        if (key.contains(entry.key) || entry.key.contains(key)) {
+          return entry.value;
+        }
+      }
+    }
+
+    // 5. Szukanie po usunięciu znaków specjalnych, spacji i myślników
+    final keyClean = key.replaceAll(RegExp(r'[\s\-_\.]'), '');
+    for (final entry in all.entries) {
+      if (entry.value.address.isEmpty) continue;
+      final entryClean = entry.key.replaceAll(RegExp(r'[\s\-_\.]'), '');
+      if (keyClean == entryClean ||
+          (keyClean.length >= 4 && entryClean.length >= 4 &&
+           (keyClean.contains(entryClean) || entryClean.contains(keyClean)))) {
         return entry.value;
       }
     }
+
+    // 6. Bezpośrednie sprawdzenie w defaultHotels (gdyby SharedPreferences na urządzeniu miało stary pusty wpis)
+    if (defaultHotels.containsKey(key) && defaultHotels[key]!.address.isNotEmpty) {
+      return defaultHotels[key];
+    }
+    if (defaultHotels.containsKey(stripped) && defaultHotels[stripped]!.address.isNotEmpty) {
+      return defaultHotels[stripped];
+    }
+    for (final entry in defaultHotels.entries) {
+      if (entry.value.address.isEmpty) continue;
+      if (key.length >= 4 && entry.key.length >= 4) {
+        if (key.contains(entry.key) || entry.key.contains(key)) {
+          return entry.value;
+        }
+      }
+    }
+
+    // 7. Ostateczny fallback: wpis bez adresu jeśli istnieje
+    if (all.containsKey(key)) return all[key];
+    if (all.containsKey(stripped)) return all[stripped];
 
     return null;
   }
@@ -350,6 +769,9 @@ class HotelDirectoryService {
       'Pobierowo',
       'Rewal',
       'Niechorze',
+      'Świeradów Zdrój',
+      'Jelenia Góra',
+      'Mielno',
     ];
     final sortedKeys = grouped.keys.toList()
       ..sort((a, b) {
@@ -413,7 +835,20 @@ class HotelDirectoryService {
           parsedCity = parenMatch.group(2)?.trim() ?? '';
         }
 
-        // Jeśli miejscowość nie jest w nawiasie, sprawdzamy czy w nazwie jest znane miasto nadmorskie
+        // Jeśli po odcięciu nawiasu nadal mamy dopasowanie do hotelu z adresem, pomijamy
+        final cleanExisting = getCachedHotel(cleanName);
+        if (cleanExisting != null && cleanExisting.address.isNotEmpty) {
+          continue;
+        }
+
+        // Ignorujemy wpisy zbyt krótkie lub będące samą nazwą miasta
+        final lowerClean = cleanName.toLowerCase();
+        if (cleanName.length < 3 ||
+            const ['kołobrzeg', 'świnoujście', 'międzyzdroje', 'ustronie morskie', 'mrzeżyno', 'dźwirzyno', 'pobierowo', 'rewal', 'niechorze', 'świeradów zdrój', 'świeradów-zdrój', 'jelenia góra', 'cieplice', 'mielno'].contains(lowerClean)) {
+          continue;
+        }
+
+        // Jeśli miejscowość nie jest w nawiasie, sprawdzamy czy w nazwie jest znane miasto
         if (parsedCity.isEmpty) {
           const knownCities = [
             'Pobierowo',
@@ -424,12 +859,19 @@ class HotelDirectoryService {
             'Dźwirzyno',
             'Grzybowo',
             'Międzywodzie',
+            'Dziwnówek',
             'Dziwnów',
             'Rewal',
             'Pogorzelica',
             'Niechorze',
             'Sianożęty',
             'Kołobrzeg',
+            'Świeradów-Zdrój',
+            'Świeradów Zdrój',
+            'Jelenia Góra',
+            'Cieplice',
+            'Mielno',
+            'Stargard',
           ];
           for (final c in knownCities) {
             // Dopasowujemy jako osobne słowo lub część nazwy (np. "Bagińscy Pobierowo" -> "Pobierowo")

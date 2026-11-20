@@ -191,5 +191,29 @@ void main() {
       final inPending = grouped['Dodane z listy']?.any((h) => h.name == 'Hotel Bez Adresu') ?? false;
       expect(inPending, isFalse);
     });
+
+    test('getCachedHotel matches expanded simulator hotels and city suffixes', () {
+      expect(HotelDirectoryService.getCachedHotel('Cesarskie O.')?.city, 'Świnoujście');
+      expect(HotelDirectoryService.getCachedHotel('Magnolia 3')?.city, 'Świeradów Zdrój');
+      expect(HotelDirectoryService.getCachedHotel('St. Lukas')?.city, 'Świeradów Zdrój');
+      expect(HotelDirectoryService.getCachedHotel('Dom Zdrojowy ŚWR')?.city, 'Świeradów Zdrój');
+      expect(HotelDirectoryService.getCachedHotel('Perła Bałtyku KG')?.city, 'Kołobrzeg');
+      expect(HotelDirectoryService.getCachedHotel('Vestina')?.city, 'Międzyzdroje');
+      expect(HotelDirectoryService.getCachedHotel('Sobótka')?.city, 'Świnoujście');
+      expect(HotelDirectoryService.getCachedHotel('Buczyński Spa')?.city, 'Świeradów Zdrój');
+    });
+
+    test('loadAll preserves default addresses if storage contains empty address', () async {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(HotelDirectoryService.permanentStorageKey, '{"magnolia 3": {"name": "Magnolia 3", "address": "", "city": "Świeradów Zdrój"}}');
+
+      HotelDirectoryService.resetCache();
+      final all = await HotelDirectoryService.loadAll();
+
+      // Should keep default address, not empty!
+      expect(all['magnolia 3']!.address, isNotEmpty);
+      expect(all['magnolia 3']!.address, 'ul. Wczasowa 1');
+    });
   });
 }
+
