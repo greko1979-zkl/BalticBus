@@ -2264,25 +2264,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                 ),
                 icon: const Icon(Icons.navigation, size: 22, color: AppColors.brandingOrange),
                 tooltip: 'Nawiguj do celu',
-                onPressed: () {
-                  if (!isPLtoDE && currentTarget.resort.isNotEmpty) {
-                    final h = HotelDirectoryService.getCachedHotel(currentTarget.resort);
-                    if (h != null && h.fullAddress.isNotEmpty) {
-                      LauncherService.openNavigation(context, h.fullAddress);
-                    } else {
-                      _showNotice(
-                        'Brak adresu hotelu ${currentTarget.resort}. Uzupełnij w zakładce Hotele.',
-                        Icons.info_outline,
-                        Colors.amber,
-                      );
-                    }
-                  } else {
-                    LauncherService.openNavigation(
-                      context,
-                      currentTarget.address,
-                    );
-                  }
-                },
+                onPressed: () => _navigateToCurrentStop(currentTarget, isPLtoDE),
               ),
             ],
           ),
@@ -2301,92 +2283,107 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
               children: [
                 if (isPLtoDE) ...[
                   // 1. Odbiór z hotelu + Nazwa hotelu + Godzina odbioru
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: Colors.amber.withValues(alpha: 0.18),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: const Icon(Icons.hotel_rounded, size: 22, color: Colors.amber),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'ODBIÓR Z HOTELU',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                                letterSpacing: 0.5,
-                                color: AppColors.gray,
-                              ),
+                  InkWell(
+                    onTap: () => _navigateToHotel(currentTarget.resort),
+                    borderRadius: BorderRadius.circular(8),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 2),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Colors.amber.withValues(alpha: 0.18),
+                              borderRadius: BorderRadius.circular(8),
                             ),
-                            const SizedBox(height: 1),
-                            Text(
-                              currentTarget.resort.isNotEmpty ? currentTarget.resort : 'Hotel w Polsce',
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white,
-                              ),
-                            ),
-                            if (currentTarget.resort.isNotEmpty) ...[
-                              Builder(
-                                builder: (context) {
-                                  final h = HotelDirectoryService.getCachedHotel(currentTarget.resort);
-                                  final addr = h != null && h.fullAddress.isNotEmpty
-                                      ? h.fullAddress
-                                      : '(brak zapisanego adresu)';
-                                  return Text(
-                                    addr,
-                                    style: TextStyle(
-                                      fontSize: 12.5,
-                                      color: Colors.white.withValues(alpha: 0.75),
-                                    ),
-                                    overflow: TextOverflow.ellipsis,
-                                  );
-                                },
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
-                        decoration: BoxDecoration(
-                          color: _isDark ? const Color(0xFF2C2A28) : Colors.amber.withValues(alpha: 0.18),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                            color: _isDark
-                                ? const Color(0xFFFFE7D0).withValues(alpha: 0.40)
-                                : Colors.amber.withValues(alpha: 0.45),
+                            child: const Icon(Icons.hotel_rounded, size: 22, color: Colors.amber),
                           ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.access_time_filled,
-                              size: 14.5,
-                              color: _isDark ? const Color(0xFFFFE7D0) : Colors.amber,
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    const Text(
+                                      'ODBIÓR Z HOTELU',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                        letterSpacing: 0.5,
+                                        color: AppColors.gray,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 5),
+                                    const Icon(Icons.near_me_outlined, size: 13, color: Colors.amber),
+                                  ],
+                                ),
+                                const SizedBox(height: 1),
+                                Text(
+                                  currentTarget.resort.isNotEmpty ? currentTarget.resort : 'Hotel w Polsce',
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                                if (currentTarget.resort.isNotEmpty) ...[
+                                  Builder(
+                                    builder: (context) {
+                                      final h = HotelDirectoryService.getCachedHotel(currentTarget.resort);
+                                      final addr = h != null && h.fullAddress.isNotEmpty
+                                          ? h.fullAddress
+                                          : '(brak zapisanego adresu)';
+                                      return Text(
+                                        addr,
+                                        style: TextStyle(
+                                          fontSize: 12.5,
+                                          color: Colors.white.withValues(alpha: 0.75),
+                                          decoration: TextDecoration.underline,
+                                          decorationColor: Colors.white24,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      );
+                                    },
+                                  ),
+                                ],
+                              ],
                             ),
-                            const SizedBox(width: 5),
-                            Text(
-                              currentTarget.hotelTime ?? '--:--',
-                              style: TextStyle(
-                                fontSize: 16.5,
-                                fontWeight: FontWeight.bold,
-                                color: _isDark ? const Color(0xFFFFE7D0) : Colors.amber,
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: _isDark ? const Color(0xFF2C2A28) : Colors.amber.withValues(alpha: 0.18),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: _isDark
+                                    ? const Color(0xFFFFE7D0).withValues(alpha: 0.40)
+                                    : Colors.amber.withValues(alpha: 0.45),
                               ),
                             ),
-                          ],
-                        ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.access_time_filled,
+                                  size: 14.5,
+                                  color: _isDark ? const Color(0xFFFFE7D0) : Colors.amber,
+                                ),
+                                const SizedBox(width: 5),
+                                Text(
+                                  currentTarget.hotelTime ?? '--:--',
+                                  style: TextStyle(
+                                    fontSize: 16.5,
+                                    fontWeight: FontWeight.bold,
+                                    color: _isDark ? const Color(0xFFFFE7D0) : Colors.amber,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
 
                   const Padding(
@@ -2395,45 +2392,64 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                   ),
 
                   // 2. Adres domowy (Niemcy)
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: AppColors.brandingOrange.withValues(alpha: 0.18),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: const Icon(Icons.home_rounded, size: 22, color: AppColors.brandingOrange),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'ADRES DOMOWY (NIEMCY)',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                                letterSpacing: 0.5,
-                                color: AppColors.gray,
-                              ),
+                  InkWell(
+                    onTap: () {
+                      if (!currentTarget.isTransfer && currentTarget.address.trim().isNotEmpty) {
+                        LauncherService.openNavigation(context, currentTarget.address);
+                      }
+                    },
+                    borderRadius: BorderRadius.circular(8),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 2),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: AppColors.brandingOrange.withValues(alpha: 0.18),
+                              borderRadius: BorderRadius.circular(8),
                             ),
-                            const SizedBox(height: 2),
-                            Text(
-                              currentTarget.displayAddress,
-                              style: const TextStyle(
-                                fontSize: 15.5,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.white,
-                                height: 1.25,
-                              ),
+                            child: const Icon(Icons.home_rounded, size: 22, color: AppColors.brandingOrange),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    const Text(
+                                      'ADRES DOMOWY (NIEMCY)',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                        letterSpacing: 0.5,
+                                        color: AppColors.gray,
+                                      ),
+                                    ),
+                                    if (!currentTarget.isTransfer) ...[
+                                      const SizedBox(width: 5),
+                                      const Icon(Icons.near_me_outlined, size: 13, color: AppColors.brandingOrange),
+                                    ],
+                                  ],
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  currentTarget.displayAddress,
+                                  style: const TextStyle(
+                                    fontSize: 15.5,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.white,
+                                    height: 1.25,
+                                  ),
+                                ),
+                              ],
                             ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
 
                   const Padding(
@@ -2497,76 +2513,95 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                 ] else ...[
                   // Niedziela: Odbiór z adresu domowego ➔ Dojazd do hotelu
                   // 1. Adres domowy + Godzina odbioru z domu
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: AppColors.brandingOrange.withValues(alpha: 0.18),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: const Icon(Icons.home_rounded, size: 22, color: AppColors.brandingOrange),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'ODBIÓR Z ADRESU DOMOWEGO (NIEMCY)',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                                letterSpacing: 0.5,
-                                color: AppColors.gray,
-                              ),
+                  InkWell(
+                    onTap: () {
+                      if (!currentTarget.isTransfer && currentTarget.address.trim().isNotEmpty) {
+                        LauncherService.openNavigation(context, currentTarget.address);
+                      }
+                    },
+                    borderRadius: BorderRadius.circular(8),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 2),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: AppColors.brandingOrange.withValues(alpha: 0.18),
+                              borderRadius: BorderRadius.circular(8),
                             ),
-                            const SizedBox(height: 2),
-                            Text(
-                              currentTarget.displayAddress,
-                              style: const TextStyle(
-                                fontSize: 15.5,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.white,
-                                height: 1.25,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
-                        decoration: BoxDecoration(
-                          color: _isDark ? const Color(0xFF2C2A28) : AppColors.brandingOrange.withValues(alpha: 0.18),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                            color: _isDark
-                                ? const Color(0xFFFFE7D0).withValues(alpha: 0.40)
-                                : AppColors.brandingOrange.withValues(alpha: 0.45),
+                            child: const Icon(Icons.home_rounded, size: 22, color: AppColors.brandingOrange),
                           ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.access_time_filled,
-                              size: 14.5,
-                              color: _isDark ? const Color(0xFFFFE7D0) : AppColors.brandingOrange,
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    const Text(
+                                      'ODBIÓR Z ADRESU DOMOWEGO (NIEMCY)',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                        letterSpacing: 0.5,
+                                        color: AppColors.gray,
+                                      ),
+                                    ),
+                                    if (!currentTarget.isTransfer) ...[
+                                      const SizedBox(width: 5),
+                                      const Icon(Icons.near_me_outlined, size: 13, color: AppColors.brandingOrange),
+                                    ],
+                                  ],
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  currentTarget.displayAddress,
+                                  style: const TextStyle(
+                                    fontSize: 15.5,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.white,
+                                    height: 1.25,
+                                  ),
+                                ),
+                              ],
                             ),
-                            const SizedBox(width: 5),
-                            Text(
-                              currentTarget.homeTimeDisplay,
-                              style: TextStyle(
-                                fontSize: 16.5,
-                                fontWeight: FontWeight.bold,
-                                color: _isDark ? const Color(0xFFFFE7D0) : AppColors.brandingOrange,
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: _isDark ? const Color(0xFF2C2A28) : AppColors.brandingOrange.withValues(alpha: 0.18),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: _isDark
+                                    ? const Color(0xFFFFE7D0).withValues(alpha: 0.40)
+                                    : AppColors.brandingOrange.withValues(alpha: 0.45),
                               ),
                             ),
-                          ],
-                        ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.access_time_filled,
+                                  size: 14.5,
+                                  color: _isDark ? const Color(0xFFFFE7D0) : AppColors.brandingOrange,
+                                ),
+                                const SizedBox(width: 5),
+                                Text(
+                                  currentTarget.homeTimeDisplay,
+                                  style: TextStyle(
+                                    fontSize: 16.5,
+                                    fontWeight: FontWeight.bold,
+                                    color: _isDark ? const Color(0xFFFFE7D0) : AppColors.brandingOrange,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
 
                   const Padding(
@@ -2575,62 +2610,77 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                   ),
 
                   // 2. Hotel docelowy w Polsce
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: Colors.blueAccent.withValues(alpha: 0.18),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: const Icon(Icons.hotel_rounded, size: 22, color: Colors.blueAccent),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'HOTEL DOCELOWY W POLSCE',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                                letterSpacing: 0.5,
-                                color: AppColors.gray,
-                              ),
+                  InkWell(
+                    onTap: () => _navigateToHotel(currentTarget.resort),
+                    borderRadius: BorderRadius.circular(8),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 2),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Colors.blueAccent.withValues(alpha: 0.18),
+                              borderRadius: BorderRadius.circular(8),
                             ),
-                            const SizedBox(height: 1),
-                            Text(
-                              currentTarget.resort.isNotEmpty ? currentTarget.resort : 'Hotel w Polsce',
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white,
-                              ),
-                            ),
-                            if (currentTarget.resort.isNotEmpty) ...[
-                              Builder(
-                                builder: (context) {
-                                  final h = HotelDirectoryService.getCachedHotel(currentTarget.resort);
-                                  final addr = h != null && h.fullAddress.isNotEmpty
-                                      ? h.fullAddress
-                                      : '(brak zapisanego adresu)';
-                                  return Text(
-                                    addr,
-                                    style: TextStyle(
-                                      fontSize: 12.5,
-                                      color: Colors.white.withValues(alpha: 0.75),
+                            child: const Icon(Icons.hotel_rounded, size: 22, color: Colors.blueAccent),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    const Text(
+                                      'HOTEL DOCELOWY W POLSCE',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                        letterSpacing: 0.5,
+                                        color: AppColors.gray,
+                                      ),
                                     ),
-                                    overflow: TextOverflow.ellipsis,
-                                  );
-                                },
-                              ),
-                            ],
-                          ],
-                        ),
+                                    const SizedBox(width: 5),
+                                    const Icon(Icons.near_me_outlined, size: 13, color: Colors.blueAccent),
+                                  ],
+                                ),
+                                const SizedBox(height: 1),
+                                Text(
+                                  currentTarget.resort.isNotEmpty ? currentTarget.resort : 'Hotel w Polsce',
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                                if (currentTarget.resort.isNotEmpty) ...[
+                                  Builder(
+                                    builder: (context) {
+                                      final h = HotelDirectoryService.getCachedHotel(currentTarget.resort);
+                                      final addr = h != null && h.fullAddress.isNotEmpty
+                                          ? h.fullAddress
+                                          : '(brak zapisanego adresu)';
+                                      return Text(
+                                        addr,
+                                        style: TextStyle(
+                                          fontSize: 12.5,
+                                          color: Colors.white.withValues(alpha: 0.75),
+                                          decoration: TextDecoration.underline,
+                                          decorationColor: Colors.white24,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      );
+                                    },
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
 
                   const Padding(
@@ -2913,7 +2963,9 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
           phaseColor = const Color(0xFF27AE60);
           phaseIcon = Icons.hotel_rounded;
           final h = HotelDirectoryService.getCachedHotel(currentStop.resort);
-          targetAddress = (h != null && h.fullAddress.isNotEmpty) ? h.fullAddress : currentStop.resort;
+          targetAddress = (h != null && h.fullAddress.isNotEmpty)
+              ? h.fullAddress
+              : (currentStop.resort.isNotEmpty ? '${currentStop.resort}, Polska' : currentStop.address);
           plannedTime = currentStop.hotelTime ?? '--:--';
           hudStreetAndNumber = (h != null && h.address.isNotEmpty) ? h.address : currentStop.resort;
           final cityPart = (h != null && h.city.isNotEmpty) ? h.city : 'Kołobrzeg';
@@ -2949,7 +3001,9 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
           phaseColor = const Color(0xFF1976D2);
           phaseIcon = Icons.hotel_rounded;
           final h = HotelDirectoryService.getCachedHotel(currentStop.resort);
-          targetAddress = (h != null && h.fullAddress.isNotEmpty) ? h.fullAddress : currentStop.resort;
+          targetAddress = (h != null && h.fullAddress.isNotEmpty)
+              ? h.fullAddress
+              : (currentStop.resort.isNotEmpty ? '${currentStop.resort}, Polska' : currentStop.address);
           plannedTime = currentStop.hotelTime ?? '--:--';
           hudStreetAndNumber = (h != null && h.address.isNotEmpty) ? h.address : currentStop.resort;
           final cityPart = (h != null && h.city.isNotEmpty) ? h.city : 'Kołobrzeg';
@@ -3306,42 +3360,60 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                             ),
                             const SizedBox(height: 10),
 
-                            // 2. ADRES Z NUMEREM (powyżej kodu i miasta)
-                            Text(
-                              hudStreetAndNumber.isNotEmpty ? hudStreetAndNumber : currentStop.address,
-                              style: const TextStyle(
-                                fontSize: 26,
-                                fontWeight: FontWeight.w900,
-                                color: Colors.white,
-                                height: 1.15,
-                                letterSpacing: 0.3,
-                              ),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            const SizedBox(height: 5),
-
-                            // 3. KOD POCZTOWY I MIASTO W JEDNEJ LINII
-                            if (hudPostalAndCity.isNotEmpty) ...[
-                              Row(
-                                children: [
-                                  const Icon(Icons.location_on, size: 19, color: Color(0xFFFF9800)),
-                                  const SizedBox(width: 5),
-                                  Expanded(
-                                    child: Text(
-                                      hudPostalAndCity,
+                            // 2. ADRES Z NUMEREM I KOD Z MIASTEM / HOTELEM (kliknięcie odpala nawigację)
+                            InkWell(
+                              onTap: () {
+                                if (targetAddress.isNotEmpty) {
+                                  LauncherService.openNavigation(context, targetAddress);
+                                } else {
+                                  _showNotice('Brak adresu do nawigacji', Icons.warning, Colors.amber);
+                                }
+                              },
+                              borderRadius: BorderRadius.circular(10),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      hudStreetAndNumber.isNotEmpty ? hudStreetAndNumber : currentStop.address,
                                       style: const TextStyle(
-                                        fontSize: 20,
-                                        fontWeight: FontWeight.bold,
-                                        color: Color(0xFFFFCC80),
+                                        fontSize: 26,
+                                        fontWeight: FontWeight.w900,
+                                        color: Colors.white,
+                                        height: 1.15,
                                         letterSpacing: 0.3,
                                       ),
+                                      maxLines: 2,
                                       overflow: TextOverflow.ellipsis,
                                     ),
-                                  ),
-                                ],
+                                    const SizedBox(height: 5),
+                                    if (hudPostalAndCity.isNotEmpty) ...[
+                                      Row(
+                                        children: [
+                                          const Icon(Icons.location_on, size: 19, color: Color(0xFFFF9800)),
+                                          const SizedBox(width: 5),
+                                          Expanded(
+                                            child: Text(
+                                              hudPostalAndCity,
+                                              style: const TextStyle(
+                                                fontSize: 20,
+                                                fontWeight: FontWeight.bold,
+                                                color: Color(0xFFFFCC80),
+                                                letterSpacing: 0.3,
+                                              ),
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 6),
+                                          const Icon(Icons.near_me_outlined, size: 18, color: Color(0xFFFF9800)),
+                                        ],
+                                      ),
+                                    ],
+                                  ],
+                                ),
                               ),
-                            ],
+                            ),
 
                             // UWAGI (np. pulsujący Rollator)
                             if (currentStop.comment.isNotEmpty) ...[
@@ -6329,25 +6401,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                   ),
                   icon: const Icon(Icons.navigation, size: 19, color: AppColors.brandingOrange),
                   tooltip: 'Nawiguj do celu',
-                  onPressed: () {
-                    if (!isPLtoDE && stop.resort.isNotEmpty) {
-                      final h = HotelDirectoryService.getCachedHotel(stop.resort);
-                      if (h != null && h.fullAddress.isNotEmpty) {
-                        LauncherService.openNavigation(context, h.fullAddress);
-                      } else {
-                        _showNotice(
-                          'Brak adresu hotelu ${stop.resort}. Uzupełnij w zakładce Hotele.',
-                          Icons.info_outline,
-                          Colors.amber,
-                        );
-                      }
-                    } else {
-                      LauncherService.openNavigation(
-                        context,
-                        stop.address,
-                      );
-                    }
-                  },
+                  onPressed: () => _navigateToCurrentStop(stop, isPLtoDE),
                 ),
                 const SizedBox(width: 4),
                 IconButton(
@@ -6374,92 +6428,107 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                 children: [
                   if (isPLtoDE) ...[
                     // 1. Odbiór z hotelu + Nazwa hotelu + Godzina odbioru
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(7),
-                          decoration: BoxDecoration(
-                            color: Colors.amber.withValues(alpha: 0.18),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: const Icon(Icons.hotel_rounded, size: 20, color: Colors.amber),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'ODBIÓR Z HOTELU',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                  letterSpacing: 0.5,
-                                  color: AppColors.gray,
-                                ),
+                    InkWell(
+                      onTap: () => _navigateToHotel(stop.resort),
+                      borderRadius: BorderRadius.circular(8),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 2),
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(7),
+                              decoration: BoxDecoration(
+                                color: Colors.amber.withValues(alpha: 0.18),
+                                borderRadius: BorderRadius.circular(8),
                               ),
-                              const SizedBox(height: 1),
-                              Text(
-                                stop.resort.isNotEmpty ? stop.resort : 'Hotel w Polsce',
-                                style: const TextStyle(
-                                  fontSize: 14.5,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white,
-                                ),
-                              ),
-                              if (stop.resort.isNotEmpty) ...[
-                                Builder(
-                                  builder: (context) {
-                                    final h = HotelDirectoryService.getCachedHotel(stop.resort);
-                                    final addr = h != null && h.fullAddress.isNotEmpty
-                                        ? h.fullAddress
-                                        : '(brak zapisanego adresu)';
-                                    return Text(
-                                      addr,
-                                      style: TextStyle(
-                                        fontSize: 11.5,
-                                        color: Colors.white.withValues(alpha: 0.75),
-                                      ),
-                                      overflow: TextOverflow.ellipsis,
-                                    );
-                                  },
-                                ),
-                              ],
-                            ],
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: _isDark ? const Color(0xFF2C2A28) : Colors.amber.withValues(alpha: 0.18),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                              color: _isDark
-                                  ? const Color(0xFFFFE7D0).withValues(alpha: 0.40)
-                                  : Colors.amber.withValues(alpha: 0.45),
+                              child: const Icon(Icons.hotel_rounded, size: 20, color: Colors.amber),
                             ),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.access_time_filled,
-                                size: 13,
-                                color: _isDark ? const Color(0xFFFFE7D0) : Colors.amber,
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      const Text(
+                                        'ODBIÓR Z HOTELU',
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                          letterSpacing: 0.5,
+                                          color: AppColors.gray,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 4),
+                                      const Icon(Icons.near_me_outlined, size: 12, color: Colors.amber),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 1),
+                                  Text(
+                                    stop.resort.isNotEmpty ? stop.resort : 'Hotel w Polsce',
+                                    style: const TextStyle(
+                                      fontSize: 14.5,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                  if (stop.resort.isNotEmpty) ...[
+                                    Builder(
+                                      builder: (context) {
+                                        final h = HotelDirectoryService.getCachedHotel(stop.resort);
+                                        final addr = h != null && h.fullAddress.isNotEmpty
+                                            ? h.fullAddress
+                                            : '(brak zapisanego adresu)';
+                                        return Text(
+                                          addr,
+                                          style: TextStyle(
+                                            fontSize: 11.5,
+                                            color: Colors.white.withValues(alpha: 0.75),
+                                            decoration: TextDecoration.underline,
+                                            decorationColor: Colors.white24,
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
+                                        );
+                                      },
+                                    ),
+                                  ],
+                                ],
                               ),
-                              const SizedBox(width: 5),
-                              Text(
-                                stop.hotelTime ?? '--:--',
-                                style: TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.bold,
-                                  color: _isDark ? const Color(0xFFFFE7D0) : Colors.amber,
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: _isDark ? const Color(0xFF2C2A28) : Colors.amber.withValues(alpha: 0.18),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: _isDark
+                                      ? const Color(0xFFFFE7D0).withValues(alpha: 0.40)
+                                      : Colors.amber.withValues(alpha: 0.45),
                                 ),
                               ),
-                            ],
-                          ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.access_time_filled,
+                                    size: 13,
+                                    color: _isDark ? const Color(0xFFFFE7D0) : Colors.amber,
+                                  ),
+                                  const SizedBox(width: 5),
+                                  Text(
+                                    stop.hotelTime ?? '--:--',
+                                    style: TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.bold,
+                                      color: _isDark ? const Color(0xFFFFE7D0) : Colors.amber,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
+                      ),
                     ),
 
                     const Padding(
@@ -6468,45 +6537,64 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                     ),
 
                     // 2. Adres domowy (Niemcy)
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(7),
-                          decoration: BoxDecoration(
-                            color: AppColors.brandingOrange.withValues(alpha: 0.18),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: const Icon(Icons.home_rounded, size: 20, color: AppColors.brandingOrange),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'ADRES DOMOWY (NIEMCY)',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                  letterSpacing: 0.5,
-                                  color: AppColors.gray,
-                                ),
+                    InkWell(
+                      onTap: () {
+                        if (!stop.isTransfer && stop.address.trim().isNotEmpty) {
+                          LauncherService.openNavigation(context, stop.address);
+                        }
+                      },
+                      borderRadius: BorderRadius.circular(8),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 2),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(7),
+                              decoration: BoxDecoration(
+                                color: AppColors.brandingOrange.withValues(alpha: 0.18),
+                                borderRadius: BorderRadius.circular(8),
                               ),
-                              const SizedBox(height: 2),
-                              Text(
-                                stop.displayAddress,
-                                style: const TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.white,
-                                  height: 1.25,
-                                ),
+                              child: const Icon(Icons.home_rounded, size: 20, color: AppColors.brandingOrange),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      const Text(
+                                        'ADRES DOMOWY (NIEMCY)',
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                          letterSpacing: 0.5,
+                                          color: AppColors.gray,
+                                        ),
+                                      ),
+                                      if (!stop.isTransfer) ...[
+                                        const SizedBox(width: 4),
+                                        const Icon(Icons.near_me_outlined, size: 12, color: AppColors.brandingOrange),
+                                      ],
+                                    ],
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    stop.displayAddress,
+                                    style: const TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.white,
+                                      height: 1.25,
+                                    ),
+                                  ),
+                                ],
                               ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
-                      ],
+                      ),
                     ),
 
                     const Padding(
@@ -6570,76 +6658,95 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                   ] else ...[
                     // Niedziela: Odbiór z adresu domowego ➔ Dojazd do hotelu
                     // 1. Adres domowy + Godzina odbioru z domu
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(7),
-                          decoration: BoxDecoration(
-                            color: AppColors.brandingOrange.withValues(alpha: 0.18),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: const Icon(Icons.home_rounded, size: 20, color: AppColors.brandingOrange),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'ODBIÓR Z ADRESU DOMOWEGO (NIEMCY)',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                  letterSpacing: 0.5,
-                                  color: AppColors.gray,
-                                ),
+                    InkWell(
+                      onTap: () {
+                        if (!stop.isTransfer && stop.address.trim().isNotEmpty) {
+                          LauncherService.openNavigation(context, stop.address);
+                        }
+                      },
+                      borderRadius: BorderRadius.circular(8),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 2),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(7),
+                              decoration: BoxDecoration(
+                                color: AppColors.brandingOrange.withValues(alpha: 0.18),
+                                borderRadius: BorderRadius.circular(8),
                               ),
-                              const SizedBox(height: 2),
-                              Text(
-                                stop.displayAddress,
-                                style: const TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.white,
-                                  height: 1.25,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: _isDark ? const Color(0xFF2C2A28) : AppColors.brandingOrange.withValues(alpha: 0.18),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                              color: _isDark
-                                  ? const Color(0xFFFFE7D0).withValues(alpha: 0.40)
-                                  : AppColors.brandingOrange.withValues(alpha: 0.45),
+                              child: const Icon(Icons.home_rounded, size: 20, color: AppColors.brandingOrange),
                             ),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.access_time_filled,
-                                size: 13,
-                                color: _isDark ? const Color(0xFFFFE7D0) : AppColors.brandingOrange,
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      const Text(
+                                        'ODBIÓR Z ADRESU DOMOWEGO (NIEMCY)',
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                          letterSpacing: 0.5,
+                                          color: AppColors.gray,
+                                        ),
+                                      ),
+                                      if (!stop.isTransfer) ...[
+                                        const SizedBox(width: 4),
+                                        const Icon(Icons.near_me_outlined, size: 12, color: AppColors.brandingOrange),
+                                      ],
+                                    ],
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    stop.displayAddress,
+                                    style: const TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.white,
+                                      height: 1.25,
+                                    ),
+                                  ),
+                                ],
                               ),
-                              const SizedBox(width: 5),
-                              Text(
-                                stop.homeTimeDisplay,
-                                style: TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.bold,
-                                  color: _isDark ? const Color(0xFFFFE7D0) : AppColors.brandingOrange,
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: _isDark ? const Color(0xFF2C2A28) : AppColors.brandingOrange.withValues(alpha: 0.18),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: _isDark
+                                      ? const Color(0xFFFFE7D0).withValues(alpha: 0.40)
+                                      : AppColors.brandingOrange.withValues(alpha: 0.45),
                                 ),
                               ),
-                            ],
-                          ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.access_time_filled,
+                                    size: 13,
+                                    color: _isDark ? const Color(0xFFFFE7D0) : AppColors.brandingOrange,
+                                  ),
+                                  const SizedBox(width: 5),
+                                  Text(
+                                    stop.homeTimeDisplay,
+                                    style: TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.bold,
+                                      color: _isDark ? const Color(0xFFFFE7D0) : AppColors.brandingOrange,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
+                      ),
                     ),
 
                     const Padding(
@@ -6648,62 +6755,77 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                     ),
 
                     // 2. Hotel docelowy w Polsce
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(7),
-                          decoration: BoxDecoration(
-                            color: Colors.blueAccent.withValues(alpha: 0.18),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: const Icon(Icons.hotel_rounded, size: 20, color: Colors.blueAccent),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'HOTEL DOCELOWY W POLSCE',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                  letterSpacing: 0.5,
-                                  color: AppColors.gray,
-                                ),
+                    InkWell(
+                      onTap: () => _navigateToHotel(stop.resort),
+                      borderRadius: BorderRadius.circular(8),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 2),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(7),
+                              decoration: BoxDecoration(
+                                color: Colors.blueAccent.withValues(alpha: 0.18),
+                                borderRadius: BorderRadius.circular(8),
                               ),
-                              const SizedBox(height: 1),
-                              Text(
-                                stop.resort.isNotEmpty ? stop.resort : 'Hotel w Polsce',
-                                style: const TextStyle(
-                                  fontSize: 14.5,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white,
-                                ),
-                              ),
-                              if (stop.resort.isNotEmpty) ...[
-                                Builder(
-                                  builder: (context) {
-                                    final h = HotelDirectoryService.getCachedHotel(stop.resort);
-                                    final addr = h != null && h.fullAddress.isNotEmpty
-                                        ? h.fullAddress
-                                        : '(brak zapisanego adresu)';
-                                    return Text(
-                                      addr,
-                                      style: TextStyle(
-                                        fontSize: 11.5,
-                                        color: Colors.white.withValues(alpha: 0.75),
+                              child: const Icon(Icons.hotel_rounded, size: 20, color: Colors.blueAccent),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      const Text(
+                                        'HOTEL DOCELOWY W POLSCE',
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                          letterSpacing: 0.5,
+                                          color: AppColors.gray,
+                                        ),
                                       ),
-                                      overflow: TextOverflow.ellipsis,
-                                    );
-                                  },
-                                ),
-                              ],
-                            ],
-                          ),
+                                      const SizedBox(width: 4),
+                                      const Icon(Icons.near_me_outlined, size: 12, color: Colors.blueAccent),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 1),
+                                  Text(
+                                    stop.resort.isNotEmpty ? stop.resort : 'Hotel w Polsce',
+                                    style: const TextStyle(
+                                      fontSize: 14.5,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                  if (stop.resort.isNotEmpty) ...[
+                                    Builder(
+                                      builder: (context) {
+                                        final h = HotelDirectoryService.getCachedHotel(stop.resort);
+                                        final addr = h != null && h.fullAddress.isNotEmpty
+                                            ? h.fullAddress
+                                            : '(brak zapisanego adresu)';
+                                        return Text(
+                                          addr,
+                                          style: TextStyle(
+                                            fontSize: 11.5,
+                                            color: Colors.white.withValues(alpha: 0.75),
+                                            decoration: TextDecoration.underline,
+                                            decorationColor: Colors.white24,
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
+                                        );
+                                      },
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
+                      ),
                     ),
 
                     const Padding(
@@ -7003,6 +7125,53 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
 
     _currentNoticeOverlay = entry;
     overlay.insert(entry);
+  }
+
+  void _navigateToHotel(String resortName) {
+    final cleanResort = resortName.trim();
+    if (cleanResort.isEmpty) {
+      _showNotice('Brak przypisanego hotelu.', Icons.info_outline, Colors.amber);
+      return;
+    }
+    final h = HotelDirectoryService.getCachedHotel(cleanResort);
+    String target;
+    if (h != null && h.fullAddress.isNotEmpty) {
+      target = h.fullAddress;
+    } else if (h != null && h.address.isNotEmpty) {
+      final cityPart = h.city.isNotEmpty ? h.city : 'Kołobrzeg';
+      target = '${h.address}, $cityPart';
+    } else if (h != null && h.city.isNotEmpty) {
+      target = '$cleanResort, ${h.city}';
+    } else {
+      target = '$cleanResort, Polska';
+    }
+    LauncherService.openNavigation(context, target);
+  }
+
+  void _navigateToCurrentStop(PassengerStop stop, bool isPLtoDE) {
+    // Sobota (Wywóz: PL -> DE):
+    //   Gdy pasażer jeszcze oczekuje na odbiór (pending) -> jedziemy do HOTELU
+    //   Gdy pasażer odebrany (pickedUp / dalszy etap) -> jedziemy pod adres domowy w DE
+    // Niedziela (Przywóz: DE -> PL):
+    //   Gdy pasażer oczekuje na odbiór (pending) -> jedziemy pod adres domowy w DE
+    //   Gdy odebrany -> jedziemy do HOTELU docelowego w Polsce
+    final bool headingToHotel = isPLtoDE
+        ? (stop.status == PickupStatus.pending)
+        : (stop.status != PickupStatus.pending);
+
+    if (headingToHotel && stop.resort.isNotEmpty) {
+      _navigateToHotel(stop.resort);
+    } else {
+      if (stop.isTransfer || stop.address.trim().isEmpty) {
+        if (stop.resort.isNotEmpty) {
+          _navigateToHotel(stop.resort);
+        } else {
+          _showNotice('Pasażer przesiadkowy - brak adresu.', Icons.info_outline, Colors.amber);
+        }
+      } else {
+        LauncherService.openNavigation(context, stop.address);
+      }
+    }
   }
 
   WeekendTripSummary _getWeekendTripSummaryForCurrentBus() {

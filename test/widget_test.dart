@@ -407,4 +407,43 @@ void main() {
     expect(find.text('Trasa'), findsOneWidget);
     expect(find.text('Tankowanie'), findsOneWidget);
   });
+
+  testWidgets('Hotel address tap on Hero Card and HUD mode interaction test',
+      (WidgetTester tester) async {
+    SharedPreferences.setMockInitialValues({});
+    await tester.pumpWidget(const BalticBusApp(initialHasActiveTrip: true));
+    await tester.pumpAndSettle();
+
+    // 1. Scroll down to passenger card and tap to expand it
+    await tester.scrollUntilVisible(
+      find.text('Angelika Borchert'),
+      200.0,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.text('Angelika Borchert'), findsOneWidget);
+    await tester.tap(find.text('Angelika Borchert'));
+    await tester.pumpAndSettle();
+
+    // Verify "ODBIÓR Z HOTELU" is now shown on the expanded card and tap it
+    expect(find.text('ODBIÓR Z HOTELU'), findsWidgets);
+    await tester.tap(find.text('ODBIÓR Z HOTELU').first);
+    await tester.pumpAndSettle();
+
+    // 2. Open HUD mode
+    final hudToggleBtn = find.byKey(const ValueKey('hud_mode_toggle_btn'));
+    await tester.tap(hudToggleBtn);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    // 3. Tap on the HUD address block (street or city with hotel)
+    final hudAddressFinder = find.textContaining('Kołobrzeg');
+    expect(hudAddressFinder, findsWidgets);
+    await tester.tap(hudAddressFinder.first);
+    await tester.pumpAndSettle();
+
+    // 4. Tap the big navigation button in HUD
+    final hudNavBtn = find.byKey(const ValueKey('hud_navigate_button'));
+    await tester.tap(hudNavBtn);
+    await tester.pumpAndSettle();
+  });
 }
