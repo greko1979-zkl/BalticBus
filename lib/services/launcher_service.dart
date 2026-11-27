@@ -214,27 +214,6 @@ class LauncherService {
     }
   }
 
-  static Future<bool> openFullRoute(BuildContext context, String routeUrl) async {
-    final uri = Uri.tryParse(routeUrl);
-    if (uri == null) {
-      _showNotice(context, 'Nieprawidłowy link do trasy.', Icons.warning);
-      return false;
-    }
-
-    try {
-      final success = await launchUrl(uri, mode: LaunchMode.externalApplication);
-      if (!success && context.mounted) {
-        _showNotice(context, 'Nie udało się otworzyć trasy w mapach.', Icons.error);
-      }
-      return success;
-    } catch (e) {
-      if (context.mounted) {
-        _showNotice(context, 'Błąd: $e', Icons.error);
-      }
-      return false;
-    }
-  }
-
   static void _showNotice(BuildContext context, String message, IconData icon) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(

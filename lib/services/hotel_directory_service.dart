@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class HotelInfo {
@@ -672,27 +671,6 @@ class HotelDirectoryService {
     return null;
   }
 
-  /// Wyszukuje hotel po nazwie z arkusza (toleruje nawiasy i wielkość liter)
-  static Future<HotelInfo?> findHotel(String rawName) async {
-    if (rawName.trim().isEmpty) return null;
-    final all = await loadAll();
-    final key = normalizeKey(rawName);
-
-    // 1. Dokładne dopasowanie po znormalizowanym kluczu
-    if (all.containsKey(key)) {
-      return all[key];
-    }
-
-    // 2. Szukanie częściowe
-    for (final entry in all.entries) {
-      if (key.contains(entry.key) || entry.key.contains(key)) {
-        return entry.value;
-      }
-    }
-
-    return null;
-  }
-
   /// Zapisuje lub aktualizuje hotel w trwałej bazie
   static Future<void> saveHotel({
     required String name,
@@ -928,69 +906,6 @@ class HotelDirectoryService {
 
     return addedCount;
   }
-
-  /// Wyszukuje online adres obiektu (OpenStreetMap / Nominatim)
-  /// Zwraca obiekt z dopasowanym adresem, ulicą i numerem
-  static Future<String?> lookupOnlineAddress({
-    required String hotelName,
-    required String city,
-  }) async {
-    final cleanName = hotelName.replaceAll(RegExp(r'\(.*?\)'), '').trim();
-    if (cleanName.isEmpty) return null;
-
-    final queries = [
-      '$cleanName $city',
-      'Hotel $cleanName $city',
-      'Sanatorium $cleanName $city',
-      '$cleanName $city Polska',
-      cleanName,
-    ];
-
-    final client = HttpClient();
-    client.connectionTimeout = const Duration(seconds: 5);
-
-    for (final q in queries) {
-      try {
-        final uri = Uri.parse('https://nominatim.openstreetmap.org/search?q=${Uri.encodeComponent(q)}&format=json&addressdetails=1&limit=3');
-        final req = await client.getUrl(uri);
-        req.headers.set('User-Agent', 'BalticBusDriverApp/1.0 (biuro@balticbus.pl)');
-        req.headers.set('Accept', 'application/json');
-
-        final res = await req.close();
-        if (res.statusCode == 200) {
-          final body = await res.transform(utf8.decoder).join();
-          final list = jsonDecode(body) as List<dynamic>;
-          if (list.isNotEmpty) {
-            for (final item in list) {
-              final map = item as Map<String, dynamic>;
-              final addr = map['address'] as Map<String, dynamic>?;
-              if (addr != null) {
-                final road = addr['road'] as String? ?? addr['pedestrian'] as String? ?? addr['street'] as String?;
-                final houseNumber = addr['house_number'] as String?;
-                if (road != null && road.isNotEmpty) {
-                  return houseNumber != null ? 'ul. $road $houseNumber' : 'ul. $road';
-                }
-              }
-              final displayName = map['display_name'] as String?;
-              if (displayName != null && displayName.isNotEmpty) {
-                final parts = displayName.split(',');
-                if (parts.length >= 2) {
-                  return parts.take(2).join(',').trim();
-                }
-              }
-            }
-          }
-        }
-      } catch (_) {}
-    }
-
-    // 2. Jeśli Nominatim nie zwrócił ulicy, sprawdzamy zbiór znanych hoteli
-    final local = getCachedHotel(cleanName);
-    if (local != null && local.address.isNotEmpty) {
-      return local.address;
-    }
-
-    return null;
-  }
 }
+
 

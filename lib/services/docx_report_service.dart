@@ -121,13 +121,6 @@ class DocxReportService {
     }
   }
 
-  /// Alias zachowujący kompatybilność wsteczną
-  static Future<String?> savePlanJazdyDocxToDesktop(
-    BuildContext context,
-    WeekendTripSummary summary,
-  ) =>
-      savePlanJazdyDocx(context, summary);
-
   /// Tworzy binarną zawartość archiwum OpenXML (.docx)
   static List<int> generatePlanJazdyDocxBytes(WeekendTripSummary summary) {
     final archive = Archive();
