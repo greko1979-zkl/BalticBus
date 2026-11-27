@@ -214,6 +214,44 @@ void main() {
       expect(all['magnolia 3']!.address, isNotEmpty);
       expect(all['magnolia 3']!.address, 'ul. Wczasowa 1');
     });
+
+    test('deleteHotel permanently removes default hotels including alias keys across restarts', () async {
+      await HotelDirectoryService.loadAll();
+
+      // Hotel z kluczem aliasowym: klucz 'new skanpol', nazwa 'Hotel New Skanpol'
+      expect(HotelDirectoryService.getCachedHotel('Hotel New Skanpol'), isNotNull);
+      await HotelDirectoryService.deleteHotel('Hotel New Skanpol');
+
+      expect(HotelDirectoryService.getAllHotelsSync().containsKey('new skanpol'), isFalse);
+      expect(HotelDirectoryService.getCachedHotel('Hotel New Skanpol'), isNull);
+
+      // Symulacja restartu aplikacji (reset cache i ponowne wczytanie z SharedPreferences)
+      HotelDirectoryService.resetCache();
+      final reloaded = await HotelDirectoryService.loadAll();
+      expect(reloaded.containsKey('new skanpol'), isFalse);
+      expect(HotelDirectoryService.getCachedHotel('Hotel New Skanpol'), isNull);
+    });
+
+    test('saveHotel with previousName removes alias duplicate on edit', () async {
+      await HotelDirectoryService.loadAll();
+
+      await HotelDirectoryService.saveHotel(
+        name: 'New Skanpol Premium',
+        address: 'ul. Dworcowa 9',
+        city: 'Kołobrzeg',
+        previousName: 'Hotel New Skanpol',
+      );
+
+      final all = HotelDirectoryService.getAllHotelsSync();
+      expect(all.containsKey('new skanpol'), isFalse);
+      expect(all['new skanpol premium']?.name, 'New Skanpol Premium');
+
+      // Sprawdzenie po restarcie
+      HotelDirectoryService.resetCache();
+      final reloaded = await HotelDirectoryService.loadAll();
+      expect(reloaded.containsKey('new skanpol'), isFalse);
+      expect(reloaded['new skanpol premium']?.name, 'New Skanpol Premium');
+    });
   });
 }
 

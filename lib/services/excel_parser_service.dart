@@ -1,16 +1,8 @@
 import 'dart:typed_data';
 import 'package:excel/excel.dart';
-import 'package:flutter/services.dart' show rootBundle;
 import '../models/route_models.dart';
 
 class ExcelParserService {
-  /// Wczytuje i parsuje domyślny plik z assets
-  static Future<List<BusRoute>> loadFromAssets(
-      [String path = 'assets/data/WEEK_01-02.08.2026.xlsx']) async {
-    final bytes = await rootBundle.load(path);
-    return parseExcelBytes(bytes.buffer.asUint8List());
-  }
-
   /// Główna metoda parsująca bajty pliku Excel (.xlsx)
   static List<BusRoute> parseExcelBytes(Uint8List bytes) {
     final excel = Excel.decodeBytes(bytes);

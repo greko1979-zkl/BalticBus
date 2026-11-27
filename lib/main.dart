@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' show ImageFilter;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -272,8 +273,8 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
   double _cashCollectedPln = 0.0;
   double _cashCollectedEur = 0.0;
   List<GuestPaymentEntry> _guestPayments = [];
-  bool _showDevOptions = false;
-  int _logoTapCounter = 0;
+  Timer? _welcomeClockTimer;
+  DateTime _welcomeCurrentTime = DateTime.now();
   OverlayEntry? _currentNoticeOverlay;
   DateTime? _driveStartTime;
   DateTime? _coffeeBreakSnoozeUntil;
@@ -303,6 +304,13 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
     _driveTimeTicker = Timer.periodic(const Duration(seconds: 30), (_) {
       if (mounted) setState(() {});
     });
+    _welcomeClockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted && _allRoutes.isEmpty) {
+        setState(() {
+          _welcomeCurrentTime = DateTime.now();
+        });
+      }
+    });
   }
 
   Future<void> _checkInitialTripState() async {
@@ -321,10 +329,6 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
     List<BusRoute> parsed = [];
     if (source.excelBytes != null && source.excelBytes!.isNotEmpty) {
       parsed = ExcelParserService.parseExcelBytes(Uint8List.fromList(source.excelBytes!));
-    } else if (source.assetPath != null && source.assetPath!.isNotEmpty) {
-      try {
-        parsed = await ExcelParserService.loadFromAssets(source.assetPath!);
-      } catch (_) {}
     }
 
     if (parsed.isNotEmpty && mounted) {
@@ -438,170 +442,6 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
     }
     _coffeeReminderMinutes = await StorageService.loadCoffeeReminderMinutes();
     if (mounted) setState(() {});
-  }
-
-  Future<void> _importFromAssets([String assetPath = 'assets/data/WEEK_01-02.08.2026.xlsx']) async {
-    setState(() => _isLoading = true);
-    final fileName = assetPath.split('/').last;
-    try {
-      final routes = await ExcelParserService.loadFromAssets(assetPath);
-      if (routes.isNotEmpty) {
-        await StorageService.setHasActiveTrip(true);
-        final busCodes = routes.map((r) => r.code).toSet().toList();
-        final dates = routes.map((r) => r.date).toSet().toList()..sort();
-
-        String defaultBus = _selectedBusCode;
-        if (!busCodes.contains(defaultBus)) {
-          defaultBus = busCodes.first;
-        }
-
-        await StorageService.saveActiveTripSource(
-          assetPath: assetPath,
-          busCode: defaultBus,
-        );
-
-        setState(() {
-          _allRoutes = routes;
-          _selectedBusCode = defaultBus;
-          if (!dates.contains(_selectedDate) && dates.isNotEmpty) {
-            _selectedDate = dates.first;
-          }
-          _isLoading = false;
-        });
-
-        // Automatyczne wykrycie i dodanie nowych hoteli do stałej bazy
-        final newHotelsCount = await HotelDirectoryService.ingestHotelsFromRoutes(routes);
-
-        if (mounted) {
-          if (newHotelsCount > 0) {
-            _showNotice(
-              'Wykryto i dodano $newHotelsCount nowych hoteli do katalogu!',
-              Icons.hotel_rounded,
-              _isDark ? AppColors.activeTheme.secondaryAccent : AppColors.brandingOrange,
-            );
-          }
-          if (busCodes.length > 1) {
-            await _showBusSelectionDialog(busCodes, routes, fileName);
-          } else {
-            await _restoreStateForRoute(_currentRoute);
-            if (mounted) {
-              _showNotice(
-                'Wczytano ${routes.length} tras (${routes.first.driverName})!',
-                Icons.check_circle,
-              );
-            }
-          }
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        _showNotice('Błąd wczytywania: $e', Icons.error);
-      }
-    } finally {
-      if (mounted && _isLoading) setState(() => _isLoading = false);
-    }
-  }
-
-  void _showPreloadedTripsPicker() {
-    const trips = [
-      {'name': 'WEEK_01-02.08.2026.xlsx', 'label': '01 - 02 Sierpnia 2026', 'path': 'assets/data/WEEK_01-02.08.2026.xlsx'},
-      {'name': 'WEEK_08-09.08.2026.xlsx', 'label': '08 - 09 Sierpnia 2026', 'path': 'assets/data/WEEK_08-09.08.2026.xlsx'},
-      {'name': 'WEEK_15-16.08.2026.xlsx', 'label': '15 - 16 Sierpnia 2026', 'path': 'assets/data/WEEK_15-16.08.2026.xlsx'},
-      {'name': 'WEEK_22-23.08.2026.xlsx', 'label': '22 - 23 Sierpnia 2026', 'path': 'assets/data/WEEK_22-23.08.2026.xlsx'},
-      {'name': 'WEEK_29-30.08.2026.xlsx', 'label': '29 - 30 Sierpnia 2026', 'path': 'assets/data/WEEK_29-30.08.2026.xlsx'},
-      {'name': 'WEEK_18-19.07.2026.xlsx', 'label': '18 - 19 Lipca 2026', 'path': 'assets/data/WEEK_18-19.07.2026.xlsx'},
-      {'name': 'WEEK_25-26.07.2026.xlsx', 'label': '25 - 26 Lipca 2026', 'path': 'assets/data/WEEK_25-26.07.2026.xlsx'},
-      {'name': 'WEEK_14-15.11.2026.xlsx', 'label': '14 - 15 Listopada 2026', 'path': 'assets/data/WEEK_14-15.11.2026.xlsx'},
-      {'name': 'WEEK_03-04.01.2026.xlsx', 'label': '03 - 04 Stycznia 2026', 'path': 'assets/data/WEEK_03-04.01.2026.xlsx'},
-    ];
-
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: _cardBg,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-        side: BorderSide(color: Color(0xFF383838), width: 1.0),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: _isDark ? const Color(0xFF5A391E) : AppColors.brandingOrange.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: _isDark ? const Color(0xFFD48B47) : AppColors.brandingOrange),
-                    ),
-                    child: Icon(
-                      Icons.folder_shared_rounded,
-                      color: _isDark ? const Color(0xFFFFD4A8) : AppColors.brandingOrange,
-                      size: 20,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Katalog wyjazdów BalticBus',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: _textPrimary,
-                          ),
-                        ),
-                        Text(
-                          'Wybierz gotowy weekend z listy (B.B. wyjazdy)',
-                          style: TextStyle(fontSize: 12, color: _textSecondary),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Flexible(
-                child: ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: trips.length,
-                  itemBuilder: (context, index) {
-                    final t = trips[index];
-                    return ListTile(
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                      leading: const CircleAvatar(
-                        radius: 16,
-                        backgroundColor: Color(0xFF2C2A28),
-                        child: Icon(Icons.table_chart_rounded, size: 16, color: Color(0xFFFFE7D0)),
-                      ),
-                      title: Text(
-                        t['name']!,
-                        style: TextStyle(color: _textPrimary, fontSize: 13.5, fontWeight: FontWeight.bold),
-                      ),
-                      subtitle: Text(
-                        t['label']!,
-                        style: TextStyle(color: _textSecondary, fontSize: 12),
-                      ),
-                      trailing: const Icon(Icons.chevron_right, size: 18, color: Colors.grey),
-                      onTap: () {
-                        Navigator.pop(ctx);
-                        _importFromAssets(t['path']!);
-                      },
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
   }
 
   Future<void> _pickExcelFile() async {
@@ -922,18 +762,6 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
               const SizedBox(height: 12),
               ListTile(
                 leading: const CircleAvatar(
-                  backgroundColor: Color(0xFF5A391E),
-                  child: Icon(Icons.folder_shared_rounded, color: Color(0xFFFFD4A8), size: 20),
-                ),
-                title: Text('Wybierz wyjazd z katalogu (B.B. wyjazdy)', style: TextStyle(color: _textPrimary, fontWeight: FontWeight.bold)),
-                subtitle: Text('Szybki wybór spośród wszystkich weekendów (lipiec, sierpień, listopad, styczeń)', style: TextStyle(color: _textSecondary)),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _showPreloadedTripsPicker();
-                },
-              ),
-              ListTile(
-                leading: const CircleAvatar(
                   backgroundColor: Color(0xFF36322E),
                   child: Icon(Icons.file_upload, color: Color(0xFFFFE7D0), size: 20),
                 ),
@@ -1051,13 +879,29 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
   }
 
   Widget _buildNoActiveTripView(AppThemeData activeTheme) {
+    final now = _welcomeCurrentTime;
+    const weekdaysPl = [
+      'Poniedziałek',
+      'Wtorek',
+      'Środa',
+      'Czwartek',
+      'Piątek',
+      'Sobota',
+      'Niedziela',
+    ];
+    final dayName = weekdaysPl[(now.weekday - 1).clamp(0, 6)];
+    final timeStr =
+        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
+    final dateStr =
+        '$dayName, ${now.day.toString().padLeft(2, '0')}.${now.month.toString().padLeft(2, '0')}.${now.year}';
+
     return Stack(
       fit: StackFit.expand,
       children: [
-        // Zdjęcie mercedesa na trasie w tle z 30% przezroczystością
+        // Zdjęcie mercedesa na trasie w tle
         Positioned.fill(
           child: Opacity(
-            opacity: 0.30,
+            opacity: 0.34,
             child: Image.asset(
               'assets/images/mercedes_vito_road.jpg',
               fit: BoxFit.cover,
@@ -1066,8 +910,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
             ),
           ),
         ),
-        // Delikatny gradient przyciemniający górę dla czytelności paska stanu
-        // Dół i środek pozostają przejrzyste, aby tapeta była świetnie widoczna
+        // Gradient tła (przyciemnia krawędzie dla czytelności)
         Positioned.fill(
           child: Container(
             decoration: BoxDecoration(
@@ -1078,148 +921,278 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                   Colors.black.withValues(alpha: 0.45),
                   Colors.transparent,
                   Colors.transparent,
-                  Colors.black.withValues(alpha: 0.20),
+                  Colors.black.withValues(alpha: 0.45),
                 ],
-                stops: const [0.0, 0.22, 0.60, 1.0],
+                stops: const [0.0, 0.25, 0.65, 1.0],
               ),
             ),
           ),
         ),
-        // Zawartość ekranu (Logo, opis na górze; przyciski na dole ekranu)
         SafeArea(
           child: LayoutBuilder(
             builder: (context, constraints) {
               return SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                 child: ConstrainedBox(
                   constraints: BoxConstraints(
-                    minHeight: constraints.maxHeight - 32,
+                    minHeight: constraints.maxHeight - 24,
                   ),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      // Górna sekcja: Logo BalticBus (podniesione o ~2 cm wyżej)
-                      Padding(
-                        padding: EdgeInsets.only(
-                          top: ((constraints.maxHeight - 32) * 0.09).clamp(24.0, 100.0),
-                        ),
-                        child: GestureDetector(
-                          key: const ValueKey('balticbus_logo_detector'),
-                          behavior: HitTestBehavior.opaque,
-                        onTap: () {
-                          _logoTapCounter++;
-                          if (_logoTapCounter >= 5) {
-                            _logoTapCounter = 0;
-                            setState(() {
-                              _showDevOptions = !_showDevOptions;
-                            });
-                            _showNotice(
-                              _showDevOptions
-                                  ? 'Odblokowano opcje testowe (Assets)'
-                                  : 'Ukryto opcje testowe',
-                              _showDevOptions ? Icons.lock_open_rounded : Icons.lock_outline_rounded,
-                              const Color(0xFFCBD5E1),
-                            );
-                          }
-                        },
-                        child: Container(
-                          width: double.infinity,
-                          constraints: const BoxConstraints(maxWidth: 380),
-                          height: 140,
-                          alignment: Alignment.center,
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
-                          child: Image.asset(
-                            'assets/images/balticbus_logo.png',
-                            fit: BoxFit.contain,
-                            errorBuilder: (context, error, stackTrace) => Container(
-                              width: 120,
-                              height: 120,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                gradient: LinearGradient(
-                                  colors: [
-                                    AppColors.brandingOrange.withValues(alpha: 0.35),
-                                    activeTheme.boxStart,
-                                  ],
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                ),
-                                border: Border.all(
-                                  color: AppColors.brandingOrange.withValues(alpha: 0.65),
-                                  width: 2,
-                                ),
-                              ),
-                              child: const Icon(
-                                Icons.directions_bus,
-                                color: Colors.white,
-                                size: 60,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      ),
-                      // Dolna sekcja: Napis hasła oraz pastylka "Rozpocznij przejazd"
-                      Padding(
-                        padding: const EdgeInsets.only(top: 28, bottom: 20),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Padding(
-                              padding: EdgeInsets.symmetric(horizontal: 20),
-                              child: Text(
-                                'Probably the best door-to-door transport in Europe.',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.w700,
-                                  fontStyle: FontStyle.normal,
-                                  letterSpacing: 1.2,
-                                  height: 1.3,
-                                  color: Color(0xFFCBB79F),
-                                  shadows: [
-                                    Shadow(
-                                      color: Colors.black,
-                                      blurRadius: 14,
-                                      offset: Offset(0, 2),
+                      // Górna sekcja: Przeźroczysty Glass Box (u góry nad mercedesem)
+                      ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 420),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(20),
+                              child: BackdropFilter(
+                                filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+                                child: Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.all(14),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withValues(alpha: 0.24),
+                                    borderRadius: BorderRadius.circular(20),
+                                    border: Border.all(
+                                      color: Colors.white.withValues(alpha: 0.16),
+                                      width: 1.2,
                                     ),
-                                    Shadow(
-                                      color: Colors.black87,
-                                      blurRadius: 6,
-                                      offset: Offset(0, 1),
-                                    ),
-                                  ],
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      // Zegar, Data i status GPS / Offline
+                                      Row(
+                                        crossAxisAlignment: CrossAxisAlignment.center,
+                                        children: [
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                Text(
+                                                  timeStr,
+                                                  style: const TextStyle(
+                                                    fontSize: 28,
+                                                    fontWeight: FontWeight.w900,
+                                                    letterSpacing: 1.5,
+                                                    height: 1.05,
+                                                    color: Colors.white,
+                                                    fontFeatures: [FontFeature.tabularFigures()],
+                                                    shadows: [
+                                                      Shadow(
+                                                        color: Colors.black54,
+                                                        blurRadius: 8,
+                                                        offset: Offset(0, 2),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                                const SizedBox(height: 3),
+                                                Text(
+                                                  dateStr,
+                                                  style: TextStyle(
+                                                    fontSize: 12.5,
+                                                    fontWeight: FontWeight.w600,
+                                                    color: Colors.white.withValues(alpha: 0.85),
+                                                    letterSpacing: 0.3,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                          Column(
+                                            crossAxisAlignment: CrossAxisAlignment.end,
+                                            children: [
+                                              Container(
+                                                padding: const EdgeInsets.symmetric(
+                                                  horizontal: 9,
+                                                  vertical: 3.5,
+                                                ),
+                                                decoration: BoxDecoration(
+                                                  color: const Color(0xFF0284C7).withValues(alpha: 0.22),
+                                                  borderRadius: BorderRadius.circular(10),
+                                                  border: Border.all(
+                                                    color: const Color(0xFF38BDF8).withValues(alpha: 0.55),
+                                                    width: 1,
+                                                  ),
+                                                ),
+                                                child: const Row(
+                                                  mainAxisSize: MainAxisSize.min,
+                                                  children: [
+                                                    Icon(
+                                                      Icons.satellite_alt_rounded,
+                                                      color: Color(0xFF38BDF8),
+                                                      size: 11,
+                                                    ),
+                                                    SizedBox(width: 5),
+                                                    Text(
+                                                      'GPS READY',
+                                                      style: TextStyle(
+                                                        color: Color(0xFF38BDF8),
+                                                        fontSize: 10,
+                                                        fontWeight: FontWeight.bold,
+                                                        letterSpacing: 0.5,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                              const SizedBox(height: 5),
+                                              Container(
+                                                padding: const EdgeInsets.symmetric(
+                                                  horizontal: 9,
+                                                  vertical: 3.5,
+                                                ),
+                                                decoration: BoxDecoration(
+                                                  color: const Color(0xFF27AE60).withValues(alpha: 0.18),
+                                                  borderRadius: BorderRadius.circular(10),
+                                                  border: Border.all(
+                                                    color: const Color(0xFF27AE60).withValues(alpha: 0.55),
+                                                    width: 1,
+                                                  ),
+                                                ),
+                                                child: const Row(
+                                                  mainAxisSize: MainAxisSize.min,
+                                                  children: [
+                                                    Icon(
+                                                      Icons.circle,
+                                                      color: Color(0xFF2ECC71),
+                                                      size: 7,
+                                                    ),
+                                                    SizedBox(width: 5),
+                                                    Text(
+                                                      'OFFLINE READY',
+                                                      style: TextStyle(
+                                                        color: Color(0xFF2ECC71),
+                                                        fontSize: 10,
+                                                        fontWeight: FontWeight.bold,
+                                                        letterSpacing: 0.5,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 12),
+                                      Divider(
+                                        color: Colors.white.withValues(alpha: 0.14),
+                                        height: 1,
+                                      ),
+                                      const SizedBox(height: 12),
+                                      // 2 Kafle dotykowe (bardziej transparentne)
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: InkWell(
+                                              onTap: _showImportOptions,
+                                              borderRadius: BorderRadius.circular(12),
+                                              child: Container(
+                                                padding: const EdgeInsets.symmetric(
+                                                  vertical: 10,
+                                                  horizontal: 10,
+                                                ),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.white.withValues(alpha: 0.06),
+                                                  borderRadius: BorderRadius.circular(12),
+                                                  border: Border.all(
+                                                    color: Colors.white.withValues(alpha: 0.16),
+                                                    width: 1.1,
+                                                  ),
+                                                ),
+                                                child: const Column(
+                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                  children: [
+                                                    Icon(
+                                                      Icons.add_road_rounded,
+                                                      color: Color(0xFF60A5FA),
+                                                      size: 21,
+                                                    ),
+                                                    SizedBox(height: 5),
+                                                    Text(
+                                                      'Wczytaj trasę',
+                                                      style: TextStyle(
+                                                        color: Colors.white,
+                                                        fontSize: 13.5,
+                                                        fontWeight: FontWeight.bold,
+                                                      ),
+                                                    ),
+                                                    SizedBox(height: 1),
+                                                    Text(
+                                                      'Excel / Gotowe pliki',
+                                                      style: TextStyle(
+                                                        color: Colors.white70,
+                                                        fontSize: 10.5,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 10),
+                                          Expanded(
+                                            child: InkWell(
+                                              onTap: _showHotelDirectoryDialog,
+                                              borderRadius: BorderRadius.circular(12),
+                                              child: Container(
+                                                padding: const EdgeInsets.symmetric(
+                                                  vertical: 10,
+                                                  horizontal: 10,
+                                                ),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.white.withValues(alpha: 0.06),
+                                                  borderRadius: BorderRadius.circular(12),
+                                                  border: Border.all(
+                                                    color: Colors.white.withValues(alpha: 0.16),
+                                                    width: 1.1,
+                                                  ),
+                                                ),
+                                                child: const Column(
+                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                  children: [
+                                                    Icon(
+                                                      Icons.hotel_rounded,
+                                                      color: Color(0xFF60A5FA),
+                                                      size: 21,
+                                                    ),
+                                                    SizedBox(height: 5),
+                                                    Text(
+                                                      'Baza hoteli',
+                                                      style: TextStyle(
+                                                        color: Colors.white,
+                                                        fontSize: 13.5,
+                                                        fontWeight: FontWeight.bold,
+                                                      ),
+                                                    ),
+                                                    SizedBox(height: 1),
+                                                    Text(
+                                                      'Adresy i telefony',
+                                                      style: TextStyle(
+                                                        color: Colors.white70,
+                                                        fontSize: 10.5,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ),
                             ),
-                            const SizedBox(height: 18),
-                            FilledButton(
-                              style: FilledButton.styleFrom(
-                                backgroundColor: const Color(0xFF36322E),
-                                foregroundColor: const Color(0xFFFFE7D0),
-                                side: const BorderSide(
-                                  color: Color(0xFF554D44),
-                                  width: 1.2,
-                                ),
-                                padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(30),
-                                ),
-                                elevation: 2,
-                              ),
-                              onPressed: _showImportOptions,
-                              child: const Text(
-                                'Rozpocznij przejazd',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                  letterSpacing: 0.5,
-                                  color: Color(0xFFFFE7D0),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
+                      ),
+
+                      // Dolna sekcja: Logo BalticBus
+                      Padding(
+                        padding: const EdgeInsets.only(top: 16, bottom: 10),
+                        child: _buildWelcomeLogo(height: 82),
                       ),
                     ],
                   ),
@@ -1229,6 +1202,222 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  /// Logo BalticBus na ekranie startowym
+  Widget _buildWelcomeLogo({double height = 82}) {
+    return Container(
+      key: const ValueKey('balticbus_logo_detector'),
+      width: double.infinity,
+      constraints: const BoxConstraints(maxWidth: 360),
+      height: height,
+      alignment: Alignment.center,
+      child: Image.asset(
+        'assets/images/balticbus_logo.png',
+        fit: BoxFit.contain,
+        errorBuilder: (context, error, stackTrace) => Container(
+          width: 82,
+          height: 82,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: AppColors.brandingOrange.withValues(alpha: 0.2),
+            border: Border.all(color: AppColors.brandingOrange, width: 2),
+          ),
+          child: const Icon(Icons.directions_bus, color: Colors.white, size: 42),
+        ),
+      ),
+    );
+  }
+
+  /// Podgląd i edycja bazy hoteli bezpośrednio z ekranu startowego
+  void _showHotelDirectoryDialog() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF1E1E1E),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (sheetCtx, setSheetState) {
+            final grouped = HotelDirectoryService.getHotelsGroupedByCitySync();
+            final cities = grouped.keys.toList();
+            final totalCount = grouped.values.fold<int>(0, (sum, list) => sum + list.length);
+
+            return DraggableScrollableSheet(
+              initialChildSize: 0.75,
+              minChildSize: 0.4,
+              maxChildSize: 0.92,
+              expand: false,
+              builder: (context, scrollController) {
+                return Column(
+                  children: [
+                    Container(
+                      margin: const EdgeInsets.symmetric(vertical: 10),
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.white24,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.hotel_rounded, color: Color(0xFF60A5FA), size: 22),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              'Katalog Hoteli ($totalCount obiektów)',
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Dodaj nowy hotel',
+                            icon: const Icon(Icons.add_circle_outline_rounded, color: AppColors.brandingOrange, size: 22),
+                            onPressed: () {
+                              _showEditHotelDialog(
+                                onSaved: () {
+                                  if (sheetCtx.mounted) setSheetState(() {});
+                                },
+                              );
+                            },
+                          ),
+                          IconButton(
+                            tooltip: 'Zamknij',
+                            icon: const Icon(Icons.close, color: Colors.white70),
+                            onPressed: () => Navigator.pop(ctx),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Divider(color: Colors.white12, height: 1),
+                    Expanded(
+                      child: ListView.builder(
+                        controller: scrollController,
+                        itemCount: cities.length,
+                        itemBuilder: (context, index) {
+                          final city = cities[index];
+                          final hotels = grouped[city] ?? [];
+                          return Theme(
+                            data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                            child: ExpansionTile(
+                              key: PageStorageKey<String>('welcome_hotel_city_$city'),
+                              iconColor: AppColors.brandingOrange,
+                              collapsedIconColor: Colors.white60,
+                              title: Text(
+                                city,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14.5,
+                                ),
+                              ),
+                              subtitle: Text(
+                                '${hotels.length} obiektów',
+                                style: const TextStyle(color: Colors.white54, fontSize: 12),
+                              ),
+                              children: hotels.map((h) {
+                                return ListTile(
+                                  dense: true,
+                                  contentPadding: const EdgeInsets.only(left: 16, right: 8),
+                                  title: Text(
+                                    h.name,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 13.5,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  subtitle: Text(
+                                    h.address.isNotEmpty
+                                        ? (h.note != null && h.note!.isNotEmpty ? '${h.address} • ${h.note}' : h.address)
+                                        : 'Brak adresu (dodany z listy)',
+                                    style: TextStyle(
+                                      color: h.address.isNotEmpty ? Colors.white60 : Colors.amber.withValues(alpha: 0.8),
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                  trailing: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      if (h.address.isNotEmpty)
+                                        IconButton(
+                                          tooltip: 'Nawiguj',
+                                          icon: const Icon(Icons.navigation_rounded, color: AppColors.brandingOrange, size: 20),
+                                          onPressed: () {
+                                            Navigator.pop(ctx);
+                                            LauncherService.openNavigation(context, '${h.name}, ${h.address}');
+                                          },
+                                        ),
+                                      PopupMenuButton<String>(
+                                        tooltip: 'Opcje hotelu',
+                                        icon: const Icon(Icons.more_vert, color: Colors.white60, size: 20),
+                                        color: const Color(0xFF282828),
+                                        onSelected: (val) {
+                                          if (val == 'edit') {
+                                            _showEditHotelDialog(
+                                              hotel: h,
+                                              onSaved: () {
+                                                if (sheetCtx.mounted) setSheetState(() {});
+                                              },
+                                            );
+                                          } else if (val == 'delete') {
+                                            _confirmDeleteHotel(
+                                              h,
+                                              onDeleted: () {
+                                                if (sheetCtx.mounted) setSheetState(() {});
+                                              },
+                                            );
+                                          }
+                                        },
+                                        itemBuilder: (context) => const [
+                                          PopupMenuItem(
+                                            value: 'edit',
+                                            child: Row(
+                                              children: [
+                                                Icon(Icons.edit_outlined, size: 18, color: Colors.white),
+                                                SizedBox(width: 8),
+                                                Text('Edytuj dane', style: TextStyle(color: Colors.white)),
+                                              ],
+                                            ),
+                                          ),
+                                          PopupMenuItem(
+                                            value: 'delete',
+                                            child: Row(
+                                              children: [
+                                                Icon(Icons.delete_outline, size: 18, color: Colors.redAccent),
+                                                SizedBox(width: 8),
+                                                Text('Usuń z bazy', style: TextStyle(color: Colors.redAccent)),
+                                              ],
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }).toList(),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                );
+              },
+            );
+          },
+        );
+      },
     );
   }
 
@@ -7093,6 +7282,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
   @override
   void dispose() {
     _driveTimeTicker?.cancel();
+    _welcomeClockTimer?.cancel();
     _hotelSearchController.dispose();
     _currentNoticeOverlay?.remove();
     _currentNoticeOverlay = null;
@@ -7544,7 +7734,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
     );
   }
 
-  void _showEditHotelDialog({HotelInfo? hotel, String? defaultCity}) {
+  void _showEditHotelDialog({HotelInfo? hotel, String? defaultCity, VoidCallback? onSaved}) {
     final isEditing = hotel != null;
     final nameCtrl = TextEditingController(text: hotel?.name ?? '');
     final addressCtrl = TextEditingController(text: hotel?.address ?? '');
@@ -7754,11 +7944,13 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
                   city: newCity,
                   note: newNote.isNotEmpty ? newNote : null,
                   fromList: newAddr.isEmpty, // Jeśli adres nadal jest pusty, pozostaje w 'Dodane z listy'
+                  previousName: hotel?.name,
                 );
                 if (mounted) {
                   setState(() {
                     _selectedHotelCity = null; // Powrót do widoku wszystkich miast, aby nowy kafelek był widoczny
                   });
+                  onSaved?.call();
                   _showNotice('Zapisano hotel $newName ($newCity)', Icons.check_circle, Colors.greenAccent);
                 }
               },
@@ -7771,7 +7963,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
     );
   }
 
-  void _confirmDeleteHotel(HotelInfo hotel) {
+  void _confirmDeleteHotel(HotelInfo hotel, {VoidCallback? onDeleted}) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -7788,7 +7980,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
           ],
         ),
         content: Text(
-          'Czy na pewno chcesz usunąć hotel "${hotel.name}" (${hotel.city}) z bazy?',
+          'Czy na pewno chcesz usunąć hotel "${hotel.name}" (${hotel.city.isNotEmpty ? hotel.city : 'Dodane z listy'}) z bazy?',
           style: TextStyle(color: _textSecondary, fontSize: 13.5),
         ),
         actions: [
@@ -7803,6 +7995,7 @@ class _DriverRouteScreenState extends State<DriverRouteScreen> {
               await HotelDirectoryService.deleteHotel(hotel.name);
               if (mounted) {
                 setState(() {});
+                onDeleted?.call();
                 _showNotice('Usunięto hotel ${hotel.name}', Icons.delete_outline, Colors.orangeAccent);
               }
             },

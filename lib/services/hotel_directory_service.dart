@@ -42,6 +42,7 @@ class HotelInfo {
 
 class HotelDirectoryService {
   static const String permanentStorageKey = 'balticbus_permanent_hotel_directory';
+  static const String deletedStorageKey = 'balticbus_deleted_hotels';
 
   /// Predefiniowany katalog popularnych hoteli i ośrodków nadmorskich oraz uzdrowiskowych z tras BalticBus
   static final Map<String, HotelInfo> defaultHotels = {
@@ -558,10 +559,12 @@ class HotelDirectoryService {
 
   /// Pamięć podręczna w RAM
   static Map<String, HotelInfo>? _cachedHotels;
+  static Set<String> _deletedKeys = {};
 
   /// Czyści pamięć podręczną (wykorzystywane m.in. w testach)
   static void resetCache() {
     _cachedHotels = null;
+    _deletedKeys = {};
   }
 
   static String normalizeKey(String raw) {
@@ -583,10 +586,21 @@ class HotelDirectoryService {
     final map = Map<String, HotelInfo>.from(defaultHotels);
     try {
       final prefs = await SharedPreferences.getInstance();
+      final deletedList = prefs.getStringList(deletedStorageKey);
+      if (deletedList != null) {
+        _deletedKeys = deletedList.toSet();
+        for (final dk in _deletedKeys) {
+          map.remove(dk);
+        }
+      } else {
+        _deletedKeys = {};
+      }
+
       final rawJson = prefs.getString(permanentStorageKey);
       if (rawJson != null && rawJson.isNotEmpty) {
         final decoded = jsonDecode(rawJson) as Map<String, dynamic>;
         for (final entry in decoded.entries) {
+          if (_deletedKeys.contains(entry.key)) continue;
           final loaded = HotelInfo.fromJson(entry.value as Map<String, dynamic>);
           // ZABEZPIECZENIE: jeśli w pamięci urządzenia jest wpis bez adresu,
           // a w katalogu domyślnym mamy już zweryfikowany adres, ZACHOWAJ adres z katalogu domyślnego!
@@ -649,13 +663,14 @@ class HotelDirectoryService {
     }
 
     // 6. Bezpośrednie sprawdzenie w defaultHotels (gdyby SharedPreferences na urządzeniu miało stary pusty wpis)
-    if (defaultHotels.containsKey(key) && defaultHotels[key]!.address.isNotEmpty) {
+    if (!_deletedKeys.contains(key) && defaultHotels.containsKey(key) && defaultHotels[key]!.address.isNotEmpty) {
       return defaultHotels[key];
     }
-    if (defaultHotels.containsKey(stripped) && defaultHotels[stripped]!.address.isNotEmpty) {
+    if (!_deletedKeys.contains(stripped) && defaultHotels.containsKey(stripped) && defaultHotels[stripped]!.address.isNotEmpty) {
       return defaultHotels[stripped];
     }
     for (final entry in defaultHotels.entries) {
+      if (_deletedKeys.contains(entry.key)) continue;
       if (entry.value.address.isEmpty) continue;
       if (key.length >= 4 && entry.key.length >= 4) {
         if (key.contains(entry.key) || entry.key.contains(key)) {
@@ -678,9 +693,31 @@ class HotelDirectoryService {
     String city = '',
     String? note,
     bool fromList = false,
+    String? previousName,
   }) async {
     final all = await loadAll();
     final key = normalizeKey(name);
+
+    if (previousName != null && previousName.trim().isNotEmpty) {
+      final prevKey = normalizeKey(previousName);
+      final prevLower = previousName.trim().toLowerCase();
+      final keysToRemove = all.entries
+          .where((e) =>
+              e.key != key &&
+              (e.key == prevKey ||
+                  normalizeKey(e.value.name) == prevKey ||
+                  e.value.name.trim().toLowerCase() == prevLower))
+          .map((e) => e.key)
+          .toList();
+      for (final oldKey in keysToRemove) {
+        all.remove(oldKey);
+        if (defaultHotels.containsKey(oldKey)) {
+          _deletedKeys.add(oldKey);
+        }
+      }
+    }
+
+    _deletedKeys.remove(key);
 
     final info = HotelInfo(
       name: name.trim(),
@@ -697,6 +734,7 @@ class HotelDirectoryService {
       final prefs = await SharedPreferences.getInstance();
       final toSave = all.map((k, v) => MapEntry(k, v.toJson()));
       await prefs.setString(permanentStorageKey, jsonEncode(toSave));
+      await prefs.setStringList(deletedStorageKey, _deletedKeys.toList());
     } catch (_) {}
   }
 
@@ -766,17 +804,41 @@ class HotelDirectoryService {
     return {for (final k in sortedKeys) k: grouped[k]!};
   }
 
-  /// Usuwa hotel z pamięci stałej
+  /// Usuwa hotel z pamięci stałej (w tym hotele wbudowane i aliasy)
   static Future<void> deleteHotel(String name) async {
     final all = await loadAll();
     final key = normalizeKey(name);
-    all.remove(key);
+    final targetLower = name.trim().toLowerCase();
+
+    final keysToRemove = <String>{
+      key,
+      ...all.entries
+          .where((e) =>
+              e.key == key ||
+              normalizeKey(e.value.name) == key ||
+              e.value.name.trim().toLowerCase() == targetLower)
+          .map((e) => e.key),
+      ...defaultHotels.entries
+          .where((e) =>
+              e.key == key ||
+              normalizeKey(e.value.name) == key ||
+              e.value.name.trim().toLowerCase() == targetLower)
+          .map((e) => e.key),
+    };
+
+    for (final k in keysToRemove) {
+      all.remove(k);
+      if (defaultHotels.containsKey(k)) {
+        _deletedKeys.add(k);
+      }
+    }
     _cachedHotels = all;
 
     try {
       final prefs = await SharedPreferences.getInstance();
       final toSave = all.map((k, v) => MapEntry(k, v.toJson()));
       await prefs.setString(permanentStorageKey, jsonEncode(toSave));
+      await prefs.setStringList(deletedStorageKey, _deletedKeys.toList());
     } catch (_) {}
   }
 

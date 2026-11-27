@@ -43,9 +43,11 @@ void main() {
     await tester.pumpWidget(const BalticBusApp(initialHasActiveTrip: false));
     await tester.pumpAndSettle();
 
-    expect(find.text('Rozpocznij przejazd'), findsOneWidget);
     expect(find.byKey(const ValueKey('balticbus_logo_detector')), findsOneWidget);
-    expect(find.text('Probably the best door-to-door transport in Europe.'), findsOneWidget);
+    expect(find.text('GPS READY'), findsOneWidget);
+    expect(find.text('Wczytaj trasę'), findsOneWidget);
+    expect(find.text('Baza hoteli'), findsOneWidget);
+    expect(find.text('Probably the best door-to-door transport in Europe.'), findsNothing);
     expect(find.textContaining('BB.01'), findsNothing);
     expect(find.text('Angelika Borchert'), findsNothing);
   });
@@ -169,12 +171,12 @@ void main() {
     await tester.pump(const Duration(seconds: 4));
     await tester.pumpAndSettle();
 
-    // 3. Verify no active trip screen is displayed (logo and production button are visible)
+    // 3. Verify no active trip screen is displayed (logo and import tile are visible)
     expect(find.byKey(const ValueKey('balticbus_logo_detector')), findsOneWidget);
-    expect(find.text('Rozpocznij przejazd'), findsOneWidget);
+    expect(find.text('Wczytaj trasę'), findsOneWidget);
 
-    // 4. Tap "Rozpocznij przejazd" button to open the import sheet and verify its actions
-    await tester.tap(find.text('Rozpocznij przejazd'));
+    // 4. Tap "Wczytaj trasę" tile to open the import sheet and verify its actions
+    await tester.tap(find.text('Wczytaj trasę'));
     await tester.pumpAndSettle();
     expect(find.text('Import rozkładu jazdy (Excel)'), findsOneWidget);
     expect(find.text('Wybierz plik Excel z urządzenia'), findsOneWidget);
